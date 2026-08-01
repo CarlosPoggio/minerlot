@@ -67,9 +67,25 @@ Two things to change to get a straight 2% fee from everyone:
   whether it's static; that depends on the ISP's lease policy.) If
   dynamic (common and cheaper for residential connections), the DNS
   record needs to auto-update whenever the IP changes — a small **Dynamic
-  DNS (DDNS)** setup, several free options exist (e.g. a small script on
-  the server itself hitting the registrar's API on an interval, or a
-  free DDNS provider). If static, this step is skipped entirely.
+  DNS (DDNS)** setup. Concrete plan: Carlos already has a Cloudflare
+  account/zone (`raspi.com`, used for the Loxone/Google Home bridge) —
+  the same account can host a `minerlot.com` zone (or a subdomain of
+  `raspi.com`, if he'd rather not buy a second domain), and a small
+  script on the Minerlot server can hit the Cloudflare API on an interval
+  to keep the A record pointed at the current public IP. Straightforward
+  to build when this starts; not built yet.
+- **The dashboard specifically can reuse the existing Cloudflare Tunnel**
+  Carlos already runs for the Loxone/Google Home bridge — Cloudflare
+  Tunnel is an HTTP(S)-oriented product, and the dashboard is plain HTTP,
+  so this is just adding one more public-hostname route
+  (`pool.raspi.com` or similar → `http://192.168.1.2:80`) to the same
+  running `cloudflared` daemon, no new tunnel needed. **This does not
+  extend to the stratum port** — Cloudflare Tunnel's free tier is
+  HTTP-oriented; proxying an arbitrary raw-TCP protocol like stratum
+  through Cloudflare requires **Spectrum, which needs an Enterprise
+  plan** (verified against Cloudflare's own docs, 2026-08-01) — not a
+  fit for this project. The stratum port still needs a real port-forward
+  + DDNS, as above.
 - **Router port forwarding**: Carlos's home router needs to forward the
   public stratum port to `192.168.1.2:3333` internally. This has to be
   done by Carlos in his router's own admin page — not something doable
@@ -108,6 +124,46 @@ above). Things worth having in place before flipping that switch:
 - A plan for what happens if the server gets more connections than the
   hardware comfortably handles (this is still a single home PC, not
   scaled infrastructure).
+
+## Network segmentation: correcting a "DMZ" assumption (2026-08-01)
+
+Carlos asked whether putting the server in a "DMZ" would keep an
+attacker who compromised it out of the rest of the home LAN. Important
+correction, checked against how home routers actually implement this:
+**the "DMZ" checkbox on a consumer router is not a real DMZ.** It just
+forwards *every* port (not only 3333) to that one device — same LAN,
+same subnet, same exposure to every other device on the network, just a
+much larger attack surface than forwarding a single port. It's a
+downgrade compared to what's already planned (forward only the stratum
+port), not an upgrade.
+
+A **real** DMZ is a separate, firewalled network segment: the exposed
+server sits on its own VLAN/subnet, and the firewall between that
+segment and the main LAN blocks the DMZ from initiating connections
+inward — so even a fully compromised box can't reach Carlos's laptops,
+phones, NAS, or the Loxone system. Building that for real needs either a
+router with VLAN support or an extra piece of hardware (a small
+VLAN-capable managed switch, or a dedicated firewall box like
+OPNsense/pfSense, or even a cheap OpenWrt travel router) sitting between
+the ISP router and the Minerlot server — not just a setting.
+
+**Practical recommendation for this project's actual scale**: the real
+attack surface here is narrow and well-understood (one specific
+application protocol — stratum — nothing else reachable; RPC, SSH, and
+the dashboard all stay LAN-only regardless). Before reaching for a full
+VLAN buildout:
+1. Check whether Carlos's current router/mesh system already offers a
+   "guest network" or "IoT network" — many consumer routers (and most
+   mesh systems) implement these with genuine client isolation from the
+   main LAN, which is most of the benefit of a real DMZ without buying
+   anything.
+2. If not, and this becomes worth the effort, a cheap secondary
+   VLAN-capable router/switch between the ISP box and the Minerlot
+   server is the realistic middle ground — full pfSense/OPNsense is
+   available but likely overkill for a single hobby server.
+3. Either way: keep only the stratum port forwarded (never use the
+   router's literal "DMZ" feature), keep the existing fail2ban/rate-limit
+   plan above, and keep monitoring logs.
 
 ## Legal/regulatory note
 
