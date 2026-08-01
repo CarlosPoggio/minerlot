@@ -18,12 +18,23 @@ session.
   Docker 29.1.3 + Compose 2.40.3 installed. UFW firewall active (deny
   incoming by default, SSH allowed, nothing else open yet). System packages
   up to date as of 2026-08-01, no reboot pending.
-- **Bitcoin Core and public-pool are deployed and running** on the
-  production server, in `/opt/minerlot` (Docker Compose, two containers:
-  `minerlot-bitcoind`, `minerlot-public-pool`). See "Bitcoin node + pool
-  deployment" below for full details. Bitcoin Core is still doing its
-  initial block download (started 2026-08-01) — the pool cannot produce
-  valid work until that finishes.
+- **Bitcoin Core, public-pool, and a monitoring dashboard are deployed and
+  running** on the production server, in `/opt/minerlot` (Docker Compose,
+  three containers: `minerlot-bitcoind`, `minerlot-public-pool`,
+  `minerlot-monitor`). See "Bitcoin node + pool deployment" and
+  "Monitoring dashboard" below for full details. Bitcoin Core is still
+  doing its initial block download (started 2026-08-01) — the pool cannot
+  produce valid work until that finishes.
+- **Server confirmed safe to run fully headless**: no monitor, keyboard,
+  or USB stick attached — it boots and runs entirely from its internal
+  NVMe disk (verified via `findmnt` / `lsblk`, the OS is on `nvme0n1p2`,
+  the install USB shows up as an untouched separate `sda` device). Power
+  + Ethernet only is enough going forward.
+- **Pending on Carlos (needs physical access, cannot be done remotely)**:
+  enable "power on after AC power loss" in the BIOS, so the server
+  restarts itself automatically after a power cut. This lives in
+  firmware/NVRAM below the OS, so it can't be set over SSH. See "Next
+  steps" for exact guidance.
 - No Bitaxe device connected yet.
 - No `.claude/` project skills or subagents (see "Why no `.claude/` yet"
   below).
@@ -81,21 +92,24 @@ session.
 
 ## Next steps
 
-1. Wait for Bitcoin Core's initial block download to finish (started
+1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
+   Lenovo boot logo, unless the boot screen says otherwise) and find
+   **Power → After Power Loss** (exact wording may vary slightly by BIOS
+   version), set it to **Power On**. This cannot be done remotely — it's
+   firmware-level, below the OS. Nothing else on the checklist depends on
+   this; it's just resilience against power cuts.
+2. Wait for Bitcoin Core's initial block download to finish (started
    2026-08-01; pruned mode does not make this faster — every block is
    still fully validated from genesis, only old ones get deleted
    afterward). Realistically hours, not minutes. Check progress with
    `docker exec minerlot-bitcoind bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=minerlot -rpcpassword=<see local.access.md> getblockchaininfo`.
-2. Once synced, connect a real Bitaxe (guide: `docs/CONECTAR_MINERO.md`)
-   and confirm shares are being accepted and the pool's `/api/info`
-   endpoint reflects live hashrate.
-3. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
-   Angular/Caddy project) for a proper visual dashboard instead of raw
-   JSON at `:3334/api/info`. Skipped for now because its backend-API
-   wiring isn't clearly documented upstream and didn't seem worth the
-   added moving part before a real miner is even connected — the raw API
-   is enough to confirm the pool is alive. Revisit if a nicer dashboard
-   becomes worth the extra container.
+3. Once synced, connect a real Bitaxe (guide: `docs/CONECTAR_MINERO.md`)
+   and confirm it shows up on the monitoring dashboard
+   (`http://192.168.1.2/`) with live hashrate.
+4. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
+   Angular/Caddy project) for a fancier dashboard than the custom one
+   already built. Low priority now that `minerlot-monitor` covers the
+   actual requirements.
 
 ## Bitcoin node + pool deployment (2026-08-01)
 
@@ -151,6 +165,46 @@ repo — these are runtime configs with secrets, kept off git; mirrored in
   and `bitcoin.conf` both support a `testnet=1`/`NETWORK=testnet` swap
   with no other changes.
 
+## Monitoring dashboard (2026-08-01)
+
+A single-screen, no-auth status page at `http://192.168.1.2/` (port 80,
+`minerlot-monitor` container, plain `nginx:1.27-alpine` serving one static
+file — no build step). Polls public-pool's own API every 5s client-side
+(`/api/pool`, `/api/client/<address>`, `/api/info`); no separate backend
+needed since public-pool already enables permissive CORS
+(`app.enableCors()` in its `main.ts`).
+
+Shows: total live hashrate, session-max hashrate (persisted in the
+viewing browser's `localStorage`, not server-side — resets only if that
+browser's site data is cleared), online/total miner count, blocks found,
+current block height, pool uptime, and a per-worker table (status dot
+from `lastSeen` recency, hashrate, IP, uptime, best difficulty, accepted
+shares, blocks found by that worker, payout address).
+
+**Deliberate small patch to upstream public-pool** to support this (files
+touched, all pure-additive/nullable, on the server's own clone at
+`/opt/minerlot/public-pool`, not upstreamed):
+- `client.entity.ts`: added `ip` (nullable varchar) and `sharesCount`
+  (int, default 0) columns. Safe because `synchronize: true` in
+  `app.module.ts` auto-migrates the SQLite schema on startup.
+- `StratumV1Client.ts`: captures `socket.remoteAddress` into `ip` when a
+  worker's DB row is first created; increments `sharesCount` by 1 per
+  accepted share (mirrors the existing `bestDifficulty` update pattern).
+- `client.service.ts`: added `incrementShares()`.
+- `client.controller.ts`: exposes `ip` and `sharesCount` in
+  `GET /api/client/:address`'s worker list.
+- Why patch instead of working around it: upstream doesn't track or
+  expose per-worker IP or a running share count anywhere (confirmed by
+  reading the actual source, not assumed) — there was no way to get this
+  data without either patching or reverse-engineering it from raw TCP
+  connections, which would've been far more fragile.
+- Risk this creates: a future `git pull` on the server's public-pool
+  clone would need this patch re-applied (it will conflict or silently
+  disappear on update, since it's not upstream). Whoever updates
+  public-pool later should check `git diff` there first, or be aware the
+  dashboard's IP/shares columns will silently stop populating for new
+  rows if the patch is lost.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
@@ -172,5 +226,6 @@ should be turned into project skills at that point, not before.
   server.
 - On the production server itself (`192.168.1.2`, not in this repo):
   `/opt/minerlot/docker-compose.yml`, `/opt/minerlot/bitcoin/` (Dockerfile
-  + bitcoin.conf), `/opt/minerlot/public-pool/` (git-cloned upstream repo
-  + local `.env`).
+  + bitcoin.conf), `/opt/minerlot/public-pool/` (git-cloned upstream repo,
+  patched — see "Monitoring dashboard" — + local `.env`),
+  `/opt/minerlot/monitor/index.html` (the dashboard).
