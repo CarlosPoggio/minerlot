@@ -104,9 +104,21 @@ session.
    afterward). Realistically hours, not minutes. Check progress with
    `docker exec minerlot-bitcoind bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=minerlot -rpcpassword=<see local.access.md> getblockchaininfo`.
 3. Once synced, confirm the already-connected Bitaxe ("naranja", see bug
-   note below) starts submitting accepted shares and shows up on the
-   monitoring dashboard (`http://192.168.1.2/`) with live hashrate.
-4. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
+   note below) starts submitting accepted shares and shows up in the
+   "Minando activamente" table on the monitoring dashboard
+   (`http://192.168.1.2/`) with live hashrate.
+4. **Carlos**: please open `http://192.168.1.2/` yourself and confirm the
+   subtitle shows "dirección: bc1q..." and the "Minando ahora"/"En espera"
+   tiles show actual numbers (not blank). While verifying this session's
+   changes, the browser-automation tool used to test the dashboard
+   appeared to redact/blank content that looks like a Bitcoin address (and
+   possibly nearby numbers) in its own screenshots and DOM reads — almost
+   certainly a deliberate safety feature of that tool (preventing the AI
+   from reading sensitive-looking financial identifiers off a page it's
+   driving), not something affecting what a real browser/human sees. But
+   it made it impossible to fully self-verify from this session, so a
+   human check is needed before trusting it's cosmetically correct.
+5. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
    Angular/Caddy project) for a fancier dashboard than the custom one
    already built. Low priority now that `minerlot-monitor` covers the
    actual requirements.
@@ -238,6 +250,72 @@ Nothing further needs to change on the Bitaxe's config — it already
 connected correctly (`bc1qv820jhzkrluuhppldtnfr43w3zrdpdnayy537p.naranja`
 via `192.168.1.2:3333`) and should just start working once sync finishes.
 
+## "Waiting miners" tracking + dashboard toggle (2026-08-01)
+
+Requested: a way to see miners that connected successfully but can't
+mine yet (blocked by the getblocktemplate/IBD situation above), separate
+from ones actively producing shares.
+
+- **public-pool patch**: `ensureClientEntity()` (previously only called
+  from `handleMiningSubmission`, i.e. after a worker's first accepted
+  share) is now also called from `initStratum()`, right after a worker
+  is authorized and subscribed — so it gets a DB row immediately instead
+  of only once it manages to mine something. A new 30s heartbeat
+  interval (separate from the existing 60s `checkDifficulty` one) keeps
+  `lastSeen` fresh independent of shares, so a genuinely-connected-but-
+  waiting worker doesn't look "offline" after 5 minutes
+  (`ClientService.killDeadClients`'s cutoff).
+- **Dashboard**: workers are split client-side into "Minando activamente"
+  (`sharesCount > 0`) shown in the main table, and "Conectados, en
+  espera" (`sharesCount === 0`) behind a toggle button showing the count.
+  No backend distinction needed beyond the sharesCount field already
+  added earlier today.
+- Verified working: the Bitaxe ("naranja") shows up correctly under
+  "en espera" with a green "Conectado" status.
+
+## Server deployment moved into git (2026-08-01)
+
+Previously, `/opt/minerlot` was a set of hand-copied files with `git
+clone`d subdirectories but no real tracked history of our own. Now the
+server's `/opt/minerlot` **is** a clone of this repo (`develop` branch),
+and `infra/` is the deployable unit. Full mechanics, secret handling, and
+update workflow: `docs/DEPLOY.md`. Summary of what changed:
+
+- `infra/public-pool` is now a proper git submodule pointing at
+  `github.com/CarlosPoggio/public-pool` (a fork with our patch as real
+  commits, `upstream` remote configured for pulling future upstream
+  changes) — replacing what used to be an ad-hoc, never-committed clone
+  directly on the server.
+- Secrets (`RPC_PASSWORD`, `WALLET_ADDRESS`) live only in a gitignored
+  `infra/.env` on the server, never in git. `bitcoin.conf`,
+  `public-pool/.env`, and `monitor/index.html` are rendered from
+  `.template` files (also gitignored once rendered) by `infra/deploy.sh`
+  via `envsubst`.
+- The old ad-hoc directory was preserved (not deleted) at
+  `/opt/minerlot-old-adhoc` on the server as a safety net during the
+  migration — safe to remove once the new setup has proven stable for a
+  while.
+- The `bitcoin-data` named Docker volume (`minerlot_bitcoin-data`) is
+  pinned explicitly in `docker-compose.yml` (`name:` field, plus a
+  top-level `name: minerlot` for the whole project) specifically so this
+  kind of restructuring can never accidentally orphan it into a
+  differently-named volume and appear to "lose" sync progress. Confirmed
+  safe: sync progress carried through this migration without interruption.
+- **Bug found during this migration and fixed**: restarting `bitcoind`
+  and `public-pool` at nearly the same instant (normal on
+  `docker compose up`) let public-pool's ZMQ subscriber connect before
+  bitcoind's ZMQ publisher was ready. ZMQ pub/sub doesn't replay missed
+  messages, and there was no fallback poll while ZMQ mode is active, so
+  `newBlock$` never got its first value and `/api/pool` hung forever
+  until a manual container restart. Fixed two ways (belt and suspenders):
+  a 30s periodic `pollMiningInfo()` safety net alongside ZMQ (patch, in
+  the public-pool fork), and a `bitcoind` healthcheck +
+  `depends_on: condition: service_healthy` on `public-pool` in
+  `docker-compose.yml` (so the race is much less likely to happen at
+  all). Verified fixed: redeployed from scratch, `public-pool` waited for
+  `bitcoind (healthy)`, and `/api/pool` worked immediately, no manual
+  restart needed.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
@@ -252,13 +330,18 @@ should be turned into project skills at that point, not before.
 - `docs/CONECTAR_MINERO.md` — Bitaxe/miner connection instructions, in
   Spanish (the one doc deliberately not in English — it's a direct runbook
   for Carlos, not an AI-continuity artifact).
+- `docs/DEPLOY.md` — how the `infra/` deployment works and how to ship
+  updates to the production server.
 - `README.md` — short public-facing project summary.
 - `.gitignore` — ignores for Node.js, Bitcoin Core data, OS/editor cruft.
 - `local.access.md` (dev machine only, gitignored, not in this repo listing
   on GitHub) — every credential, IP, and build detail for the production
   server.
-- On the production server itself (`192.168.1.2`, not in this repo):
-  `/opt/minerlot/docker-compose.yml`, `/opt/minerlot/bitcoin/` (Dockerfile
-  + bitcoin.conf), `/opt/minerlot/public-pool/` (git-cloned upstream repo,
-  patched — see "Monitoring dashboard" — + local `.env`),
-  `/opt/minerlot/monitor/index.html` (the dashboard).
+- `infra/` — the actual deployable unit, mirrored 1:1 on the server at
+  `/opt/minerlot/infra` (the server's `/opt/minerlot` is a git clone of
+  this whole repo, not a separate copy). See `docs/DEPLOY.md` for the
+  full layout and workflow. Briefly: `docker-compose.yml`,
+  `bitcoin/Dockerfile` + `.template`, `public-pool/` (git submodule, our
+  fork), `public-pool.env.template`, `monitor/index.html.template`,
+  `deploy.sh`, `env.example`. Real secrets only ever exist in a
+  gitignored `infra/.env` on the server.
