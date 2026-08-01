@@ -9,11 +9,18 @@ session.
 
 ## What exists right now
 
-- Documentation and repo scaffolding only: `CLAUDE.md`, this file, `README.md`,
+- Documentation and repo scaffolding: `CLAUDE.md`, this file, `README.md`,
   `.gitignore`.
-- No Bitcoin node installed or configured.
-- No pool software (public-pool) installed or configured.
-- No Bitaxe device connected.
+- **Production server is live and reachable**: `minerlot-node`, Ubuntu Server
+  26.04 LTS, static LAN IP `192.168.1.2`, reachable over SSH (key-only) from
+  the dev machine. Hardware: Intel i5-9400T, 6 cores, 14 GB RAM, 233 GB disk
+  (214 GB free) — comfortably more than the original dev-machine baseline.
+  Docker 29.1.3 + Compose 2.40.3 installed. UFW firewall active (deny
+  incoming by default, SSH allowed, nothing else open yet). System packages
+  up to date as of 2026-08-01, no reboot pending.
+- No Bitcoin node installed or configured yet.
+- No pool software (public-pool) installed or configured yet.
+- No Bitaxe device connected yet.
 - No `.claude/` project skills or subagents (see "Why no `.claude/` yet"
   below).
 
@@ -70,17 +77,21 @@ session.
 
 ## Next steps
 
-1. Carlos boots the prepared autoinstall USB on the production machine
-   (Secure Boot disabled, ethernet connected) and reports back the IP
-   address shown on screen after first boot.
-2. Connect over SSH from the dev machine, harden access (install the
-   prepared public key, disable password auth), and do first system updates.
-3. Install and configure Bitcoin Core in pruned mode on the production
-   machine.
-4. Install and configure public-pool, pointing it at the local node via
+1. Install and configure Bitcoin Core in pruned mode on the production
+   machine, via Docker Compose.
+2. Install and configure public-pool, pointing it at the local node via
    RPC + ZMQ, wired to Carlos's payout address (kept out of git).
-5. Connect one Bitaxe device and run a first end-to-end test on
+3. Connect one Bitaxe device and run a first end-to-end test on
    regtest/testnet before touching mainnet.
+
+## Done — production server bring-up (2026-08-01)
+
+1. ~~Carlos boots the prepared autoinstall USB~~ — done, zero manual
+   install steps, first try.
+2. ~~Connect over SSH, harden access, first system updates~~ — done:
+   key-only SSH confirmed (`sshd -T` shows `passwordauthentication no`),
+   moved from DHCP to static `192.168.1.2` via netplan, UFW enabled
+   (SSH-only for now), `apt upgrade` applied cleanly, no reboot required.
 
 ## Why no `.claude/` yet
 
