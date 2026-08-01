@@ -27,7 +27,25 @@
     display: flex; align-items: center; gap: 10px;
   }
   h1 .dot { color: var(--accent); }
-  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  .search-bar {
+    display: flex; gap: 8px; margin-bottom: 24px; max-width: 640px;
+  }
+  .search-bar input {
+    flex: 1; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 12px; color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+  }
+  .search-bar input:focus { outline: none; border-color: var(--accent); }
+  .search-bar button {
+    background: var(--accent); color: #0b0f14; border: none;
+    border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  .search-bar button:hover { opacity: 0.9; }
+  .search-error { color: var(--bad); font-size: 13px; margin: -16px 0 20px; }
 
   .totals {
     display: grid;
@@ -100,6 +118,12 @@
   <h1><span class="dot">●</span> Minerlot — Panel de minado</h1>
   <div class="subtitle" id="subtitle">Cargando…</div>
 
+  <div class="search-bar">
+    <input type="text" id="address-input" placeholder="Tu dirección de Bitcoin (bc1q...)" spellcheck="false" autocomplete="off">
+    <button id="search-btn">Ver mis mineros</button>
+  </div>
+  <div class="search-error" id="search-error" style="display:none;"></div>
+
   <div class="totals" id="totals"></div>
 
   <div class="section-head">
@@ -116,11 +140,10 @@
         <th>Mejor dificultad</th>
         <th>Contribuciones</th>
         <th>Bloques</th>
-        <th>Billetera</th>
       </tr>
     </thead>
     <tbody id="workers-body">
-      <tr><td colspan="9" class="empty">Cargando…</td></tr>
+      <tr><td colspan="8" class="empty">Cargando…</td></tr>
     </tbody>
   </table>
 
@@ -140,22 +163,56 @@
         <th>Nombre</th>
         <th>IP</th>
         <th>Conectado desde</th>
-        <th>Billetera</th>
       </tr>
     </thead>
     <tbody id="waiting-body">
-      <tr><td colspan="5" class="empty">Cargando…</td></tr>
+      <tr><td colspan="4" class="empty">Cargando…</td></tr>
     </tbody>
   </table>
 
   <footer id="footer"></footer>
 
 <script>
-// Config: single-user solo pool, so we always query this one address.
-const ADDRESS = "${WALLET_ADDRESS}";
-const API_BASE = "http://" + window.location.hostname + ":3334/api";
+// Same-origin: nginx proxies /api/ to the public-pool container internally
+// (see infra/monitor/nginx.conf), so this works unchanged whether reached
+// via the LAN IP or, later, via a public domain.
+const API_BASE = "/api";
 const REFRESH_MS = 5000;
-const MAX_HR_KEY = "minerlot_max_hashrate";
+const DEFAULT_ADDRESS = "${WALLET_ADDRESS}";
+
+let ADDRESS = new URLSearchParams(location.search).get("address") || DEFAULT_ADDRESS;
+document.getElementById("address-input").value = ADDRESS;
+
+function isValidBitcoinAddress(addr) {
+  // Loose client-side sanity check, not a full validator — the API call
+  // itself is the real source of truth (it'll just return an empty
+  // workers list for a well-formed but unknown/invalid address).
+  return typeof addr === "string" && addr.length >= 26 && addr.length <= 62 && /^[a-zA-Z0-9]+$/.test(addr);
+}
+
+function goToAddress(addr) {
+  addr = addr.trim();
+  if (!isValidBitcoinAddress(addr)) {
+    const err = document.getElementById("search-error");
+    err.textContent = "Esa no parece una dirección de Bitcoin válida.";
+    err.style.display = "block";
+    return;
+  }
+  document.getElementById("search-error").style.display = "none";
+  ADDRESS = addr;
+  const url = new URL(location.href);
+  url.searchParams.set("address", addr);
+  history.pushState({}, "", url);
+  localStorage.setItem("minerlot_last_address", addr);
+  refresh();
+}
+
+document.getElementById("search-btn").addEventListener("click", () => {
+  goToAddress(document.getElementById("address-input").value);
+});
+document.getElementById("address-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") goToAddress(e.target.value);
+});
 
 function formatHashRate(hashesPerSecond) {
   if (!hashesPerSecond || hashesPerSecond <= 0) return "0 H/s";
@@ -189,14 +246,9 @@ function formatIp(ip) {
   return ip.replace(/^::ffff:/, "");
 }
 
-function shortAddr(addr) {
-  if (!addr || addr.length < 16) return addr || "—";
-  return addr.slice(0, 8) + "…" + addr.slice(-6);
-}
-
-function countBlocksForWorker(blockData, workerName) {
+function countBlocksForWorker(blockData, address, workerName) {
   if (!Array.isArray(blockData)) return 0;
-  return blockData.filter(b => b.worker === workerName).length;
+  return blockData.filter(b => b.minerAddress === address && b.worker === workerName).length;
 }
 
 let waitingVisible = false;
@@ -209,7 +261,7 @@ async function refresh() {
   try {
     const [poolRes, clientRes, infoRes] = await Promise.all([
       fetch(API_BASE + "/pool").then(r => r.json()),
-      fetch(API_BASE + "/client/" + ADDRESS).then(r => r.json()),
+      fetch(API_BASE + "/client/" + encodeURIComponent(ADDRESS)).then(r => r.json()),
       fetch(API_BASE + "/info").then(r => r.json())
     ]);
 
@@ -222,35 +274,39 @@ async function refresh() {
     const waitingWorkers = allWorkers.filter(w => (w.sharesCount || 0) === 0);
 
     const liveTotalHashRate = activeWorkers.reduce((sum, w) => sum + (w.hashRate || 0), 0);
+    const blocksForAddress = (poolRes.blocksFound || []).filter(b => b.minerAddress === ADDRESS).length;
 
-    // Client-side running max, persisted across reloads on this browser/screen.
-    const storedMax = parseFloat(localStorage.getItem(MAX_HR_KEY) || "0");
-    const newMax = Math.max(storedMax, liveTotalHashRate, poolRes.totalHashRate || 0);
-    if (newMax > storedMax) localStorage.setItem(MAX_HR_KEY, String(newMax));
+    // Client-side running max, persisted per-address across reloads on
+    // this browser (different addresses looked up on the same browser
+    // don't mix their maxes together).
+    const maxHrKey = "minerlot_max_hashrate_" + ADDRESS;
+    const storedMax = parseFloat(localStorage.getItem(maxHrKey) || "0");
+    const newMax = Math.max(storedMax, liveTotalHashRate);
+    if (newMax > storedMax) localStorage.setItem(maxHrKey, String(newMax));
 
     const onlineActiveCount = activeWorkers.filter(w => isOnline(w.lastSeen)).length;
     const onlineWaitingCount = waitingWorkers.filter(w => isOnline(w.lastSeen)).length;
 
     document.getElementById("subtitle").textContent =
-      `Actualizado ${new Date().toLocaleTimeString("es-ES")} · dirección: ${ADDRESS}`;
+      `Actualizado ${new Date().toLocaleTimeString("es-ES")} · pool en bloque ${poolRes.blockHeight ?? "—"}`;
 
     const totalsHtml = `
-      <div class="tile"><div class="label">Hashrate total</div><div class="value accent">${formatHashRate(liveTotalHashRate)}</div></div>
-      <div class="tile"><div class="label">Máximo alcanzado</div><div class="value">${formatHashRate(newMax)}</div></div>
+      <div class="tile"><div class="label">Tu hashrate</div><div class="value accent">${formatHashRate(liveTotalHashRate)}</div></div>
+      <div class="tile"><div class="label">Tu máximo alcanzado</div><div class="value">${formatHashRate(newMax)}</div></div>
       <div class="tile"><div class="label">Minando ahora</div><div class="value">${onlineActiveCount} / ${activeWorkers.length}</div></div>
       <div class="tile"><div class="label">En espera</div><div class="value">${onlineWaitingCount}</div></div>
-      <div class="tile"><div class="label">Bloques encontrados</div><div class="value">${(poolRes.blocksFound || []).length}</div></div>
-      <div class="tile"><div class="label">Altura de bloque</div><div class="value">${poolRes.blockHeight ?? "—"}</div></div>
+      <div class="tile"><div class="label">Tus bloques</div><div class="value">${blocksForAddress}</div></div>
+      <div class="tile"><div class="label">Altura de bloque (pool)</div><div class="value">${poolRes.blockHeight ?? "—"}</div></div>
     `;
     document.getElementById("totals").innerHTML = totalsHtml;
 
     const tbody = document.getElementById("workers-body");
     if (activeWorkers.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty">Todavía ningún minero produciendo trabajo válido.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">Todavía ningún minero de esta dirección produciendo trabajo válido.</td></tr>`;
     } else {
       tbody.innerHTML = activeWorkers.map(w => {
         const online = isOnline(w.lastSeen);
-        const blocks = countBlocksForWorker(poolRes.blocksFound, w.name);
+        const blocks = countBlocksForWorker(poolRes.blocksFound, ADDRESS, w.name);
         return `
           <tr>
             <td><span class="status-dot ${online ? "on" : "off"}"></span>${online ? "Activo" : "Desconectado"}</td>
@@ -261,7 +317,6 @@ async function refresh() {
             <td class="mono">${w.bestDifficulty ?? "0"}</td>
             <td>${w.sharesCount ?? 0}</td>
             <td>${blocks}</td>
-            <td class="mono addr" title="${ADDRESS}">${shortAddr(ADDRESS)}</td>
           </tr>
         `;
       }).join("");
@@ -272,7 +327,7 @@ async function refresh() {
 
     const waitingBody = document.getElementById("waiting-body");
     if (waitingWorkers.length === 0) {
-      waitingBody.innerHTML = `<tr><td colspan="5" class="empty">Ninguno en espera ahora mismo.</td></tr>`;
+      waitingBody.innerHTML = `<tr><td colspan="4" class="empty">Ninguno en espera ahora mismo.</td></tr>`;
     } else {
       waitingBody.innerHTML = waitingWorkers.map(w => {
         const online = isOnline(w.lastSeen);
@@ -282,14 +337,13 @@ async function refresh() {
             <td>${w.name || "worker"}</td>
             <td class="mono">${formatIp(w.ip)}</td>
             <td>${formatDuration(w.startTime)}</td>
-            <td class="mono addr" title="${ADDRESS}">${shortAddr(ADDRESS)}</td>
           </tr>
         `;
       }).join("");
     }
 
     document.getElementById("footer").textContent =
-      `Se actualiza solo cada ${REFRESH_MS / 1000}s. El "máximo alcanzado" se guarda en este navegador y no se reinicia al recargar la página, salvo que se borren los datos del navegador.`;
+      `Se actualiza solo cada ${REFRESH_MS / 1000}s. El "máximo alcanzado" se guarda en este navegador por dirección, y no se reinicia al recargar la página, salvo que se borren los datos del navegador.`;
 
   } catch (err) {
     document.getElementById("subtitle").textContent = "Error al conectar con la pool: " + err.message;

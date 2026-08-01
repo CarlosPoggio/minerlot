@@ -54,10 +54,13 @@ services:
     restart: unless-stopped
     depends_on:
       - public-pool
+    networks:
+      - minerlot
     ports:
       - "80:80/tcp" # dashboard, no auth, LAN only (see firewall notes in docs)
     volumes:
       - ./monitor/index.html:/usr/share/nginx/html/index.html:ro
+      - ./monitor/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   bitcoin-data:
