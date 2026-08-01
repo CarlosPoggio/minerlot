@@ -42,14 +42,27 @@ session.
   re-supply it at that point if it isn't already sitting in a local
   untracked file.
 - **Production machine**: decided — **Ubuntu Server 26.04 LTS** ("Resolute
-  Raccoon"), headless, everything run via Docker Compose. Carlos is setting
-  up the physical hardware now (in progress as of 2026-08-01). Access model:
-  SSH over the home LAN only (no port forwarding / no internet-facing
-  exposure) — the dev machine (this one) reaches the production box directly
-  by its local IP. A dedicated ed25519 keypair was generated on the dev
-  machine (`~/.ssh/minerlot_prod`) for this purpose; first contact will be
-  password auth during OS install, then the pool's public key gets installed
-  and password auth gets disabled.
+  Raccoon"), headless, everything run via Docker Compose. Access model: SSH
+  over the home LAN only (no port forwarding / no internet-facing exposure)
+  — the dev machine (this one) reaches the production box directly by its
+  local IP. A dedicated ed25519 keypair was generated on the dev machine
+  (`~/.ssh/minerlot_prod`) and is already baked into the install as an
+  authorized key (password SSH login is disabled from first boot; a local
+  console password still exists as an emergency fallback — see
+  `local.access.md`, gitignored, on the dev machine).
+- **Unattended install USB built (2026-08-01)**: rather than a manual
+  installer walkthrough, an autoinstall (cloud-init) USB was built directly
+  on the dev machine — official Ubuntu Server ISO copied onto the USB,
+  `user-data`/`meta-data` added at its root, and `boot/grub/grub.cfg`'s
+  default entry patched with `autoinstall ds=nocloud\;s=/cdrom/` plus
+  `timeout=1`, so it installs with zero keypresses once booted (only a
+  one-time BIOS Secure Boot disable is needed, since the modified boot
+  files aren't Canonical-signed). First network boot uses DHCP; the plan is
+  to move to a static `192.168.1.2` afterward once SSH access is confirmed
+  (not baked into the image). Docker + docker-compose-v2 install
+  automatically via the autoinstall config's `late-commands`. Full
+  credentials/build details are in `local.access.md` (gitignored, dev
+  machine only — this repo is public).
 - **Dev machine longevity**: once the production machine is reachable over
   SSH, all further Bitcoin Core / public-pool work happens there directly,
   not on this Windows dev machine. This Windows PC remains just for
@@ -57,8 +70,9 @@ session.
 
 ## Next steps
 
-1. Carlos finishes installing Ubuntu Server 26.04 LTS on the production
-   machine and reports back its local IP address (in progress).
+1. Carlos boots the prepared autoinstall USB on the production machine
+   (Secure Boot disabled, ethernet connected) and reports back the IP
+   address shown on screen after first boot.
 2. Connect over SSH from the dev machine, harden access (install the
    prepared public key, disable password auth), and do first system updates.
 3. Install and configure Bitcoin Core in pruned mode on the production
