@@ -107,18 +107,7 @@ session.
    note below) starts submitting accepted shares and shows up in the
    "Minando activamente" table on the monitoring dashboard
    (`http://192.168.1.2/`) with live hashrate.
-4. **Carlos**: please open `http://192.168.1.2/` yourself and confirm the
-   subtitle shows "dirección: bc1q..." and the "Minando ahora"/"En espera"
-   tiles show actual numbers (not blank). While verifying this session's
-   changes, the browser-automation tool used to test the dashboard
-   appeared to redact/blank content that looks like a Bitcoin address (and
-   possibly nearby numbers) in its own screenshots and DOM reads — almost
-   certainly a deliberate safety feature of that tool (preventing the AI
-   from reading sensitive-looking financial identifiers off a page it's
-   driving), not something affecting what a real browser/human sees. But
-   it made it impossible to fully self-verify from this session, so a
-   human check is needed before trusting it's cosmetically correct.
-5. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
+4. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
    Angular/Caddy project) for a fancier dashboard than the custom one
    already built. Low priority now that `minerlot-monitor` covers the
    actual requirements.
@@ -315,6 +304,65 @@ update workflow: `docs/DEPLOY.md`. Summary of what changed:
   all). Verified fixed: redeployed from scratch, `public-pool` waited for
   `bitcoind (healthy)`, and `/api/pool` worked immediately, no manual
   restart needed.
+
+## Dashboard became a per-address lookup panel + real root cause of the "blank tiles" bug (2026-08-01)
+
+Requested: turn the dashboard into a normal public-solo-pool-style lookup
+— anyone who knows a specific payout address can search it and see that
+address's own workers, same risk profile as before (still just the
+read-only status API, stratum stays closed/LAN-only, nothing new
+published).
+
+- `monitor/index.html.template`: added a search box (`?address=` in the
+  URL, shareable/bookmarkable), scoped the whole page (hashrate, max
+  reached — now keyed per-address in `localStorage`, active/waiting
+  worker tables, blocks-found count) to whichever address is currently
+  searched, defaulting to `WALLET_ADDRESS` from `.env` on first load.
+  Pool-wide-only info (block height) stays general.
+- `monitor/nginx.conf` (new): the dashboard now calls relative `/api/...`
+  paths instead of hardcoding `http://<LAN-IP>:3334`, and nginx reverse-
+  proxies `/api/` to the `public-pool` container internally. This is what
+  makes it keep working unchanged once reachable through a domain instead
+  of the LAN IP (see `docs/ROADMAP_PUBLIC_POOL.md`) — no dashboard code
+  changes needed for that later, just point the domain at port 80.
+
+**Real root cause of a bug incorrectly diagnosed earlier as "browser-tool
+redaction"**: earlier the same day, several dashboard tiles (online
+worker counts, blocks-found) rendered blank with no JS error, and it was
+suspected (wrongly — recorded here for correction, not repeated) that the
+Claude-in-Chrome browser tool was redacting sensitive-looking content in
+its own screenshots/DOM reads. **That was incorrect.** The actual cause:
+`deploy.sh` ran `envsubst < index.html.template > index.html` with no
+restriction list. `envsubst` substitutes *every* `${...}`-shaped token in
+a file, not just intended ones — and the dashboard's own JavaScript is
+full of unrelated template-literal syntax that looks identical
+(`${onlineActiveCount}`, `${blocksForAddress}`, etc.). Since those aren't
+real environment variables, `envsubst` silently replaced each one with an
+empty string, with no error anywhere — exactly matching the symptom.
+Confirmed by re-rendering and diffing the output, and by the fact the
+bug reappeared identically after the address-lookup rewrite, before
+being fixed. **Fix**: `deploy.sh` now passes an explicit variable list to
+every `envsubst` call (e.g. `envsubst '${WALLET_ADDRESS}' < ...`), so
+only real placeholders ever get touched. Verified fixed by screenshot —
+all tiles show real numbers now, and a search for an unrelated
+placeholder address correctly shows all zeros.
+
+**Lesson for future template files**: any `.template` file meant to be
+rendered with `envsubst` — especially ones containing JS, JSON, or
+anything else that might use `${...}` syntax for its own purposes — must
+always be rendered with an explicit variable list, never bare `envsubst`.
+
+**Also observed and expected, not a bug**: during this same session, a
+redeploy briefly left `bitcoind`'s Docker healthcheck reporting
+"unhealthy" for about a minute (blocking `public-pool` from starting,
+since it depends on `bitcoind` being healthy). Cause: after a restart
+mid-sync, Bitcoin Core replays/rolls forward recent blocks and goes
+through its normal warmup ("Loading block index…", RPC error -28) before
+`getblockchaininfo` responds — routine behavior, not a fault. It resolved
+on its own within about a minute; `docker compose up -d` again (or just
+waiting) picks it up correctly. Not worth "fixing" (e.g., by loosening
+the healthcheck) — it's the healthcheck correctly doing its job of
+waiting for real readiness rather than just "process started".
 
 ## Why no `.claude/` yet
 
