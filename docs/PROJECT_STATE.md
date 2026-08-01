@@ -32,25 +32,41 @@ session.
 
 ## Open questions / pending on the human
 
-- **Payout address**: Carlos has not yet provided the Bitcoin receiving
-  address for solo-mining payouts. Needed before public-pool can be
-  configured for real payouts. Not a blocker for current documentation work.
-- **Production machine**: still undecided, pending physical access/hardware
-  from Carlos. Current recommendation from the lead engineer (not finalized
-  or actioned): a headless Ubuntu Server LTS box, or a Raspberry Pi OS
-  device later, running everything via Docker Compose.
-- **Dev machine longevity**: whether/when development work moves off the
-  current Windows PC (i5, 8GB RAM, 250GB SSD) onto the eventual production
-  machine is not decided.
+- **Payout address**: provided by Carlos on 2026-08-01, verified locally
+  (bech32 checksum valid, mainnet, P2WPKH — standard single-sig segwit
+  address). Deliberately NOT stored anywhere in this repo, since the repo
+  is public — publishing a real payout address publicly would link it to
+  Carlos's identity for no benefit. It will be wired directly into
+  public-pool's local, gitignored config once that service is installed on
+  the production machine. Whoever picks this up next: ask Carlos to
+  re-supply it at that point if it isn't already sitting in a local
+  untracked file.
+- **Production machine**: decided — **Ubuntu Server 26.04 LTS** ("Resolute
+  Raccoon"), headless, everything run via Docker Compose. Carlos is setting
+  up the physical hardware now (in progress as of 2026-08-01). Access model:
+  SSH over the home LAN only (no port forwarding / no internet-facing
+  exposure) — the dev machine (this one) reaches the production box directly
+  by its local IP. A dedicated ed25519 keypair was generated on the dev
+  machine (`~/.ssh/minerlot_prod`) for this purpose; first contact will be
+  password auth during OS install, then the pool's public key gets installed
+  and password auth gets disabled.
+- **Dev machine longevity**: once the production machine is reachable over
+  SSH, all further Bitcoin Core / public-pool work happens there directly,
+  not on this Windows dev machine. This Windows PC remains just for
+  documentation/repo work and as the SSH client used to reach production.
 
 ## Next steps
 
-1. Install and configure Bitcoin Core in pruned mode on the dev machine.
-2. Install and configure public-pool, pointing it at the local node via
-   RPC + ZMQ.
-3. Connect one Bitaxe device and run a first end-to-end test on
+1. Carlos finishes installing Ubuntu Server 26.04 LTS on the production
+   machine and reports back its local IP address (in progress).
+2. Connect over SSH from the dev machine, harden access (install the
+   prepared public key, disable password auth), and do first system updates.
+3. Install and configure Bitcoin Core in pruned mode on the production
+   machine.
+4. Install and configure public-pool, pointing it at the local node via
+   RPC + ZMQ, wired to Carlos's payout address (kept out of git).
+5. Connect one Bitaxe device and run a first end-to-end test on
    regtest/testnet before touching mainnet.
-4. Decide production hosting once hardware/access is available from Carlos.
 
 ## Why no `.claude/` yet
 
