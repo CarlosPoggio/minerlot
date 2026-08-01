@@ -21,6 +21,12 @@ services:
       - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf:ro
     # No ports published: only reachable by other containers on the
     # "minerlot" network, never from the LAN or host.
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-datadir=/home/bitcoin/.bitcoin", "getblockchaininfo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   public-pool:
     build:
@@ -29,7 +35,8 @@ services:
     container_name: minerlot-public-pool
     restart: unless-stopped
     depends_on:
-      - bitcoind
+      bitcoind:
+        condition: service_healthy
     networks:
       - minerlot
     ports:
