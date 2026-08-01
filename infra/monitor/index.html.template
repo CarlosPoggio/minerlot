@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minerlot — Panel de minado</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --panel-border: #232d38;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #f7931a;
+    --good: #3fb950;
+    --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  body { padding: 24px 32px 40px; }
+  h1 {
+    font-size: 22px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h1 .dot { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+  .totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .tile .label {
+    font-size: 12px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin-bottom: 6px;
+  }
+  .tile .value {
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .tile .value.accent { color: var(--accent); }
+
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 10px; overflow: hidden;
+  }
+  thead th {
+    text-align: left; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); font-weight: 600;
+    padding: 12px 14px; border-bottom: 1px solid var(--panel-border);
+  }
+  tbody td {
+    padding: 12px 14px; font-size: 14px; border-bottom: 1px solid var(--panel-border);
+    font-variant-numeric: tabular-nums;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+  .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .status-dot.off { background: var(--bad); }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .addr { color: var(--muted); cursor: help; }
+  .empty { color: var(--muted); text-align: center; padding: 40px !important; }
+
+  .section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 28px 0 10px;
+  }
+  .section-head h2 { font-size: 15px; margin: 0; color: var(--text); }
+
+  button.toggle {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.toggle:hover { border-color: var(--accent); }
+
+  .waiting-note {
+    color: var(--muted); font-size: 12px; margin: 10px 0 0;
+  }
+
+  footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+  <h1><span class="dot">●</span> Minerlot — Panel de minado</h1>
+  <div class="subtitle" id="subtitle">Cargando…</div>
+
+  <div class="totals" id="totals"></div>
+
+  <div class="section-head">
+    <h2>Minando activamente</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Estado</th>
+        <th>Nombre</th>
+        <th>Hashrate</th>
+        <th>IP</th>
+        <th>Activo desde</th>
+        <th>Mejor dificultad</th>
+        <th>Contribuciones</th>
+        <th>Bloques</th>
+        <th>Billetera</th>
+      </tr>
+    </thead>
+    <tbody id="workers-body">
+      <tr><td colspan="9" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-head">
+    <h2>Conectados, en espera</h2>
+    <button class="toggle" id="waiting-toggle">Ver mineros en espera (0)</button>
+  </div>
+  <div class="waiting-note">
+    Se conectaron correctamente pero todavía no reciben trabajo real —
+    normalmente porque el nodo de Bitcoin sigue sincronizando (ver
+    docs/CONECTAR_MINERO.md). No es un error del minero.
+  </div>
+  <table id="waiting-table" style="margin-top: 10px; display: none;">
+    <thead>
+      <tr>
+        <th>Estado</th>
+        <th>Nombre</th>
+        <th>IP</th>
+        <th>Conectado desde</th>
+        <th>Billetera</th>
+      </tr>
+    </thead>
+    <tbody id="waiting-body">
+      <tr><td colspan="5" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <footer id="footer"></footer>
+
+<script>
+// Config: single-user solo pool, so we always query this one address.
+const ADDRESS = "${WALLET_ADDRESS}";
+const API_BASE = "http://" + window.location.hostname + ":3334/api";
+const REFRESH_MS = 5000;
+const MAX_HR_KEY = "minerlot_max_hashrate";
+
+function formatHashRate(hashesPerSecond) {
+  if (!hashesPerSecond || hashesPerSecond <= 0) return "0 H/s";
+  const units = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s"];
+  let v = hashesPerSecond, i = 0;
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  return v.toFixed(2) + " " + units[i];
+}
+
+function formatDuration(startIso) {
+  if (!startIso) return "—";
+  const start = new Date(startIso).getTime();
+  const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+  const d = Math.floor(diffSec / 86400);
+  const h = Math.floor((diffSec % 86400) / 3600);
+  const m = Math.floor((diffSec % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(d + "d");
+  if (h || d) parts.push(h + "h");
+  parts.push(m + "m");
+  return parts.join(" ");
+}
+
+function isOnline(lastSeenIso) {
+  if (!lastSeenIso) return false;
+  return (Date.now() - new Date(lastSeenIso).getTime()) < 150 * 1000;
+}
+
+function formatIp(ip) {
+  if (!ip) return "—";
+  return ip.replace(/^::ffff:/, "");
+}
+
+function shortAddr(addr) {
+  if (!addr || addr.length < 16) return addr || "—";
+  return addr.slice(0, 8) + "…" + addr.slice(-6);
+}
+
+function countBlocksForWorker(blockData, workerName) {
+  if (!Array.isArray(blockData)) return 0;
+  return blockData.filter(b => b.worker === workerName).length;
+}
+
+let waitingVisible = false;
+document.getElementById("waiting-toggle").addEventListener("click", () => {
+  waitingVisible = !waitingVisible;
+  document.getElementById("waiting-table").style.display = waitingVisible ? "table" : "none";
+});
+
+async function refresh() {
+  try {
+    const [poolRes, clientRes, infoRes] = await Promise.all([
+      fetch(API_BASE + "/pool").then(r => r.json()),
+      fetch(API_BASE + "/client/" + ADDRESS).then(r => r.json()),
+      fetch(API_BASE + "/info").then(r => r.json())
+    ]);
+
+    const allWorkers = clientRes.workers || [];
+    // A worker only counts as "actively mining" once it has at least one
+    // accepted share. Until then it's "connected, waiting" — typically
+    // because bitcoind is still syncing and can't hand out real work yet
+    // (see docs/CONECTAR_MINERO.md).
+    const activeWorkers = allWorkers.filter(w => (w.sharesCount || 0) > 0);
+    const waitingWorkers = allWorkers.filter(w => (w.sharesCount || 0) === 0);
+
+    const liveTotalHashRate = activeWorkers.reduce((sum, w) => sum + (w.hashRate || 0), 0);
+
+    // Client-side running max, persisted across reloads on this browser/screen.
+    const storedMax = parseFloat(localStorage.getItem(MAX_HR_KEY) || "0");
+    const newMax = Math.max(storedMax, liveTotalHashRate, poolRes.totalHashRate || 0);
+    if (newMax > storedMax) localStorage.setItem(MAX_HR_KEY, String(newMax));
+
+    const onlineActiveCount = activeWorkers.filter(w => isOnline(w.lastSeen)).length;
+    const onlineWaitingCount = waitingWorkers.filter(w => isOnline(w.lastSeen)).length;
+
+    document.getElementById("subtitle").textContent =
+      `Actualizado ${new Date().toLocaleTimeString("es-ES")} · dirección: ${ADDRESS}`;
+
+    const totalsHtml = `
+      <div class="tile"><div class="label">Hashrate total</div><div class="value accent">${formatHashRate(liveTotalHashRate)}</div></div>
+      <div class="tile"><div class="label">Máximo alcanzado</div><div class="value">${formatHashRate(newMax)}</div></div>
+      <div class="tile"><div class="label">Minando ahora</div><div class="value">${onlineActiveCount} / ${activeWorkers.length}</div></div>
+      <div class="tile"><div class="label">En espera</div><div class="value">${onlineWaitingCount}</div></div>
+      <div class="tile"><div class="label">Bloques encontrados</div><div class="value">${(poolRes.blocksFound || []).length}</div></div>
+      <div class="tile"><div class="label">Altura de bloque</div><div class="value">${poolRes.blockHeight ?? "—"}</div></div>
+    `;
+    document.getElementById("totals").innerHTML = totalsHtml;
+
+    const tbody = document.getElementById("workers-body");
+    if (activeWorkers.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty">Todavía ningún minero produciendo trabajo válido.</td></tr>`;
+    } else {
+      tbody.innerHTML = activeWorkers.map(w => {
+        const online = isOnline(w.lastSeen);
+        const blocks = countBlocksForWorker(poolRes.blocksFound, w.name);
+        return `
+          <tr>
+            <td><span class="status-dot ${online ? "on" : "off"}"></span>${online ? "Activo" : "Desconectado"}</td>
+            <td>${w.name || "worker"}</td>
+            <td>${formatHashRate(w.hashRate)}</td>
+            <td class="mono">${formatIp(w.ip)}</td>
+            <td>${formatDuration(w.startTime)}</td>
+            <td class="mono">${w.bestDifficulty ?? "0"}</td>
+            <td>${w.sharesCount ?? 0}</td>
+            <td>${blocks}</td>
+            <td class="mono addr" title="${ADDRESS}">${shortAddr(ADDRESS)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    document.getElementById("waiting-toggle").textContent =
+      `${waitingVisible ? "Ocultar" : "Ver"} mineros en espera (${waitingWorkers.length})`;
+
+    const waitingBody = document.getElementById("waiting-body");
+    if (waitingWorkers.length === 0) {
+      waitingBody.innerHTML = `<tr><td colspan="5" class="empty">Ninguno en espera ahora mismo.</td></tr>`;
+    } else {
+      waitingBody.innerHTML = waitingWorkers.map(w => {
+        const online = isOnline(w.lastSeen);
+        return `
+          <tr>
+            <td><span class="status-dot ${online ? "on" : "off"}"></span>${online ? "Conectado" : "Desconectado"}</td>
+            <td>${w.name || "worker"}</td>
+            <td class="mono">${formatIp(w.ip)}</td>
+            <td>${formatDuration(w.startTime)}</td>
+            <td class="mono addr" title="${ADDRESS}">${shortAddr(ADDRESS)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    document.getElementById("footer").textContent =
+      `Se actualiza solo cada ${REFRESH_MS / 1000}s. El "máximo alcanzado" se guarda en este navegador y no se reinicia al recargar la página, salvo que se borren los datos del navegador.`;
+
+  } catch (err) {
+    document.getElementById("subtitle").textContent = "Error al conectar con la pool: " + err.message;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+
+</body>
+</html>

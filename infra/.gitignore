@@ -1,0 +1,11 @@
+# Real secrets — never commit. Copy env.example to .env and fill it in.
+.env
+
+# Rendered from *.template by deploy.sh — contain real secrets/values.
+bitcoin/bitcoin.conf
+monitor/index.html
+
+# public-pool's own runtime config and local sqlite DB (not part of the
+# submodule's tracked content anyway, but explicit for clarity).
+public-pool/.env
+public-pool/mainnet-DB/

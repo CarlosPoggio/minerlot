@@ -1,0 +1,25 @@
+# Minerlot production bitcoind config template.
+# Rendered to bitcoin.conf by deploy.sh (envsubst) — bitcoin.conf itself is
+# gitignored since it contains real RPC credentials. See ../.env.example.
+server=1
+disablewallet=1
+txindex=0
+
+# Pruned mode: keep ~10GB of recent blocks. Full validation still happens;
+# only old raw block data gets discarded afterward. See docs/PROJECT_STATE.md.
+prune=10000
+
+# Speed up initial sync given 14GB RAM on this host, leaving headroom for
+# the OS, Docker, and the public-pool container.
+dbcache=4000
+par=4
+
+# RPC: reachable only from the internal docker-compose network, never
+# published to the host or LAN.
+rpcbind=0.0.0.0
+rpcallowip=172.30.0.0/24
+rpcuser=${RPC_USER}
+rpcpassword=${RPC_PASSWORD}
+
+# ZMQ: notifies public-pool of new blocks to rebuild templates immediately.
+zmqpubrawblock=tcp://0.0.0.0:3000

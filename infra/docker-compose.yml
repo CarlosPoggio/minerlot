@@ -1,0 +1,57 @@
+name: minerlot
+
+networks:
+  minerlot:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+services:
+  bitcoind:
+    build:
+      context: ./bitcoin
+      dockerfile: Dockerfile
+    container_name: minerlot-bitcoind
+    restart: unless-stopped
+    networks:
+      - minerlot
+    volumes:
+      - bitcoin-data:/home/bitcoin/.bitcoin
+      - ./bitcoin/bitcoin.conf:/home/bitcoin/.bitcoin/bitcoin.conf:ro
+    # No ports published: only reachable by other containers on the
+    # "minerlot" network, never from the LAN or host.
+
+  public-pool:
+    build:
+      context: ./public-pool
+      dockerfile: Dockerfile
+    container_name: minerlot-public-pool
+    restart: unless-stopped
+    depends_on:
+      - bitcoind
+    networks:
+      - minerlot
+    ports:
+      - "3333:3333/tcp" # stratum, must reach the LAN for Bitaxes
+      - "3334:3334/tcp" # JSON status API, LAN-reachable
+    volumes:
+      - ./public-pool/mainnet-DB:/public-pool/DB
+      - ./public-pool/.env:/public-pool/.env:ro
+    environment:
+      - NODE_ENV=production
+
+  monitor:
+    image: nginx:1.27-alpine
+    container_name: minerlot-monitor
+    restart: unless-stopped
+    depends_on:
+      - public-pool
+    ports:
+      - "80:80/tcp" # dashboard, no auth, LAN only (see firewall notes in docs)
+    volumes:
+      - ./monitor/index.html:/usr/share/nginx/html/index.html:ro
+
+volumes:
+  bitcoin-data:
+    name: minerlot_bitcoin-data
