@@ -103,9 +103,9 @@ session.
    still fully validated from genesis, only old ones get deleted
    afterward). Realistically hours, not minutes. Check progress with
    `docker exec minerlot-bitcoind bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=minerlot -rpcpassword=<see local.access.md> getblockchaininfo`.
-3. Once synced, connect a real Bitaxe (guide: `docs/CONECTAR_MINERO.md`)
-   and confirm it shows up on the monitoring dashboard
-   (`http://192.168.1.2/`) with live hashrate.
+3. Once synced, confirm the already-connected Bitaxe ("naranja", see bug
+   note below) starts submitting accepted shares and shows up on the
+   monitoring dashboard (`http://192.168.1.2/`) with live hashrate.
 4. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
    Angular/Caddy project) for a fancier dashboard than the custom one
    already built. Low priority now that `minerlot-monitor` covers the
@@ -204,6 +204,39 @@ touched, all pure-additive/nullable, on the server's own clone at
   public-pool later should check `git diff` there first, or be aware the
   dashboard's IP/shares columns will silently stop populating for new
   rows if the patch is lost.
+
+## Bug found and fixed: public-pool crashed on every getblocktemplate error (2026-08-01)
+
+First real Bitaxe connection attempt (worker name "naranja", from
+192.168.1.15) exposed a crash bug in upstream public-pool: while
+`bitcoind` is in initial block download, `getblocktemplate` correctly
+returns an error (Bitcoin Core refuses to serve templates until synced —
+expected, not a bug on our side). But in
+`stratum-v1-jobs.service.ts`, that rejected promise from
+`bitcoinRpcService.getBlockTemplate()` inside the `newMiningJob$`
+RxJS pipeline (built from `combineLatest([newBlock$, refreshInterval$]).pipe(switchMap(...))`)
+had no `catchError`, so it became an unhandled rejection that crashed the
+entire Node process. Docker's `restart: unless-stopped` masked this as a
+silent crash-loop — the container kept "running" (from `docker ps`'s
+perspective, restarting every time) but never stayed up long enough to
+serve a miner.
+
+**Fix** (patched locally on the server's clone, same caveat as the
+IP/shares patch above re: `git pull`): added `catchError` around the
+`getBlockTemplate` call in `stratum-v1-jobs.service.ts`, logging the
+error and returning RxJS `EMPTY` instead of propagating it — the next
+`newBlock$` emission or 60s interval tick just retries. Verified fixed:
+container now stays up (`RestartCount: 0`) through repeated
+getblocktemplate failures while syncing, logging
+`Skipping job update, getBlockTemplate failed: ...` instead of crashing.
+
+**Important**: this fix makes the pool *stable* while waiting for sync,
+not *functional* yet — `getblocktemplate` will keep failing (harmlessly
+now) until `bitcoind`'s `initialblockdownload` flag goes false, so the
+Bitaxe won't actually get real work or submit accepted shares until then.
+Nothing further needs to change on the Bitaxe's config — it already
+connected correctly (`bc1qv820jhzkrluuhppldtnfr43w3zrdpdnayy537p.naranja`
+via `192.168.1.2:3333`) and should just start working once sync finishes.
 
 ## Why no `.claude/` yet
 
