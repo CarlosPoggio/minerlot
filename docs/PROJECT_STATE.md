@@ -18,8 +18,12 @@ session.
   Docker 29.1.3 + Compose 2.40.3 installed. UFW firewall active (deny
   incoming by default, SSH allowed, nothing else open yet). System packages
   up to date as of 2026-08-01, no reboot pending.
-- No Bitcoin node installed or configured yet.
-- No pool software (public-pool) installed or configured yet.
+- **Bitcoin Core and public-pool are deployed and running** on the
+  production server, in `/opt/minerlot` (Docker Compose, two containers:
+  `minerlot-bitcoind`, `minerlot-public-pool`). See "Bitcoin node + pool
+  deployment" below for full details. Bitcoin Core is still doing its
+  initial block download (started 2026-08-01) — the pool cannot produce
+  valid work until that finishes.
 - No Bitaxe device connected yet.
 - No `.claude/` project skills or subagents (see "Why no `.claude/` yet"
   below).
@@ -77,21 +81,75 @@ session.
 
 ## Next steps
 
-1. Install and configure Bitcoin Core in pruned mode on the production
-   machine, via Docker Compose.
-2. Install and configure public-pool, pointing it at the local node via
-   RPC + ZMQ, wired to Carlos's payout address (kept out of git).
-3. Connect one Bitaxe device and run a first end-to-end test on
-   regtest/testnet before touching mainnet.
+1. Wait for Bitcoin Core's initial block download to finish (started
+   2026-08-01; pruned mode does not make this faster — every block is
+   still fully validated from genesis, only old ones get deleted
+   afterward). Realistically hours, not minutes. Check progress with
+   `docker exec minerlot-bitcoind bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=minerlot -rpcpassword=<see local.access.md> getblockchaininfo`.
+2. Once synced, connect a real Bitaxe (guide: `docs/CONECTAR_MINERO.md`)
+   and confirm shares are being accepted and the pool's `/api/info`
+   endpoint reflects live hashrate.
+3. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
+   Angular/Caddy project) for a proper visual dashboard instead of raw
+   JSON at `:3334/api/info`. Skipped for now because its backend-API
+   wiring isn't clearly documented upstream and didn't seem worth the
+   added moving part before a real miner is even connected — the raw API
+   is enough to confirm the pool is alive. Revisit if a nicer dashboard
+   becomes worth the extra container.
 
-## Done — production server bring-up (2026-08-01)
+## Bitcoin node + pool deployment (2026-08-01)
 
-1. ~~Carlos boots the prepared autoinstall USB~~ — done, zero manual
-   install steps, first try.
-2. ~~Connect over SSH, harden access, first system updates~~ — done:
-   key-only SSH confirmed (`sshd -T` shows `passwordauthentication no`),
-   moved from DHCP to static `192.168.1.2` via netplan, UFW enabled
-   (SSH-only for now), `apt upgrade` applied cleanly, no reboot required.
+Deployed directly to the production server at `/opt/minerlot` (not this
+repo — these are runtime configs with secrets, kept off git; mirrored in
+`local.access.md` on the dev machine):
+
+- **`bitcoin/Dockerfile`**: custom image, not a third-party prebuilt one.
+  Downloads the *official* Bitcoin Core 31.1 Linux binary directly from
+  bitcoincore.org during build and verifies its SHA256 before using it —
+  chosen over community Docker images (e.g. `lncm/bitcoind`) to avoid an
+  extra layer of trust beyond Bitcoin Core's own release process, in
+  keeping with the project's "don't depend on third parties" principle.
+  Runs as a non-root user, wallet disabled (`disablewallet=1` — never
+  needed, since payouts go to whatever address each Bitaxe supplies at
+  the stratum level, not to a pool-managed wallet).
+- **`bitcoin/bitcoin.conf`**: `prune=10000` (~10GB), `dbcache=4000` (speeds
+  up validation given 14GB RAM), ZMQ block notifications enabled, RPC
+  reachable only inside the compose-internal Docker network
+  (`172.30.0.0/24`), never published to the LAN or host.
+- **`public-pool`**: official upstream repo
+  (github.com/benjamin-wilson/public-pool) git-cloned directly onto the
+  server and built from source via its own Dockerfile — not a prebuilt
+  image either. `NETWORK=mainnet`, `DEV_FEE_ADDRESS` left blank (no fees,
+  per this project's core requirement). Talks to `bitcoind` over the
+  internal Docker network by container name, never touches the LAN for
+  that.
+  - **Solo-mining payout model**: public-pool does not take a pool-wide
+    payout address in its config at all. Each miner supplies its OWN
+    payout address as the stratum username (optionally
+    `address.workername`, confirmed by reading
+    `AuthorizationMessage.ts` in the upstream source — it splits on `.`,
+    validates the first part as a Bitcoin address). This is the correct,
+    non-custodial behavior: whichever device's address is set on it gets
+    credited if it finds a block. See `docs/CONECTAR_MINERO.md`.
+  - Ports: `3333` (stratum, for Bitaxes) and `3334` (JSON status API) are
+    published to the LAN. `8332` (bitcoind RPC) is never published.
+- **Firewall**: UFW alone does **not** cover Docker-published ports —
+  Docker manipulates iptables directly and bypasses UFW's normal rules
+  for anything published via `docker-compose.yml`'s `ports:`. Fixed by
+  adding an explicit `DOCKER-USER` iptables chain (via
+  `/etc/ufw/after.rules`, reloaded with `ufw reload`) that only allows
+  192.168.1.0/24 (the home LAN) to reach ports 3333/3334, dropping
+  everything else. Verified with `iptables -L DOCKER-USER -n -v`.
+- **Decision: mainnet directly, not testnet/regtest first.** The
+  original plan (see git history) was to test on testnet/regtest before
+  touching mainnet. In practice, running a second full node just to
+  validate stratum plumbing added more moving parts than it saved, and
+  the deployment itself (Docker build, RPC/ZMQ wiring, firewall) is
+  identical regardless of network — testing it on mainnet costs nothing
+  extra since finding a real block is astronomically unlikely during
+  a quick smoke test anyway. If this ever needs revisiting, `NETWORK=`
+  and `bitcoin.conf` both support a `testnet=1`/`NETWORK=testnet` swap
+  with no other changes.
 
 ## Why no `.claude/` yet
 
@@ -104,8 +162,15 @@ should be turned into project skills at that point, not before.
 
 - `CLAUDE.md` — project instructions auto-loaded by Claude Code each session.
 - `docs/PROJECT_STATE.md` — this file.
+- `docs/CONECTAR_MINERO.md` — Bitaxe/miner connection instructions, in
+  Spanish (the one doc deliberately not in English — it's a direct runbook
+  for Carlos, not an AI-continuity artifact).
 - `README.md` — short public-facing project summary.
 - `.gitignore` — ignores for Node.js, Bitcoin Core data, OS/editor cruft.
-
-This section will grow as the Bitcoin node config, public-pool config, and
-any scripts are added.
+- `local.access.md` (dev machine only, gitignored, not in this repo listing
+  on GitHub) — every credential, IP, and build detail for the production
+  server.
+- On the production server itself (`192.168.1.2`, not in this repo):
+  `/opt/minerlot/docker-compose.yml`, `/opt/minerlot/bitcoin/` (Dockerfile
+  + bitcoin.conf), `/opt/minerlot/public-pool/` (git-cloned upstream repo
+  + local `.env`).
