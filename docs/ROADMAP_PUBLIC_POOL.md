@@ -113,7 +113,27 @@ Today's firewall setup (`docs/PROJECT_STATE.md` — the `DOCKER-USER`
 iptables rule) deliberately restricts everything to `192.168.1.0/24`. To
 go public, that specific restriction needs to be relaxed for the stratum
 port only (not RPC, not the dashboard unless deliberately redesigned per
-above). Things worth having in place before flipping that switch:
+above).
+
+**On "publishing" the port (Carlos asked, 2026-08-01)**: the stratum
+port has to be publicly known for miners to connect to it — that's
+unavoidable and not itself a meaningful extra risk. Automated internet
+scanners (Shodan-style mass scanning) find every open port on every
+public IP within hours regardless of whether anyone "announces" it, so
+treating the port number as a secret buys essentially nothing. The real
+risk reduction comes from defense in depth, not obscurity:
+narrow exposure (only this one port, nothing else, is reachable —
+RPC/dashboard/SSH stay LAN-only regardless), Docker containment (a bug
+in the stratum handler compromises the container, not the host, unless
+there's *also* a container-escape vulnerability), the network
+segmentation above (even a fully compromised container/host still can't
+reach the main LAN), and Node.js's memory-safety (rules out the
+memory-corruption vulnerability class that's historically been the worst
+category for internet-facing C/C++ daemons). This is the same exposure
+profile as any ordinary website — port 80/443 being "known" isn't
+considered a security problem for those either; what matters is what's
+actually running behind it. Things worth having in place before flipping
+that switch:
 
 - Rate limiting / connection limits per source IP on the stratum port
   (public-pool has `STRATUM_MAX_CONNECTIONS_PER_LISTENER`, already set,
