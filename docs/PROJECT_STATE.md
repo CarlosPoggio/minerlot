@@ -46,7 +46,7 @@ session.
 | Pool software: public-pool | Purpose-built for solo home-ASIC mining (Bitaxe), has a per-device dashboard, talks to local Bitcoin Core via RPC+ZMQ, runs on modest hardware. Chosen over ckpool-solo. |
 | Bitcoin Core in pruned mode (`prune=10000`, ~10GB) | Pruning discards old raw blocks after full validation; full validation and complete UTXO set are unaffected. Block-template building (`getblocktemplate`) and chain validation work identically. The node just can't serve historical blocks to peers, which doesn't matter for a personal mining backend. Makes this feasible on an 8GB RAM / 250GB SSD dev machine. |
 | Non-custodial design | Payouts go to a public receiving address only. Private keys/seed phrases never touch this system. |
-| No fees, solo only | No proportional/shared payout logic. A multi-user pool is a possible future project, not planned work. |
+| No fees, solo only, for now | Current deployment has no fees, LAN only. Carlos has decided the eventual direction (2026-08-01): a public, internet-facing solo pool with a 2% fee — still not proportional/shared payout, just a fee on top of solo mining. Planned but explicitly not started; see `docs/ROADMAP_PUBLIC_POOL.md`. |
 | Branching: git-flow-lite, `main` + `develop` | `main` = stable snapshots (GitHub default branch). `develop` = day-to-day integration branch, checked out locally by default. |
 | Commit style: Conventional Commits, no AI attribution | Repo-wide convention; hard rule against "Co-Authored-By" or similar trailers. |
 | Repo language: English | All files, code, comments, and commit messages in English regardless of conversation language. |
