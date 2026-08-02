@@ -362,7 +362,72 @@ through its normal warmup ("Loading block index…", RPC error -28) before
 on its own within about a minute; `docker compose up -d` again (or just
 waiting) picks it up correctly. Not worth "fixing" (e.g., by loosening
 the healthcheck) — it's the healthcheck correctly doing its job of
-waiting for real readiness rather than just "process started".
+waiting for real readiness rather than just "process started". (Later
+made less annoying, not eliminated — see next section.)
+
+## Sync percentage + live log viewer added; several deploy-reliability bugs found and fixed (2026-08-02)
+
+Requested: show sync percentage on the dashboard, and a live log viewer.
+Both done; building/deploying them also surfaced three real
+deploy-reliability bugs, all fixed.
+
+**New: `GET /api/sync`** — small public-pool patch, `BitcoinRpcService
+.getSyncStatus()` calls `getblockchaininfo` directly (cheap, answers even
+mid-IBD, unlike `getblocktemplate`). Dashboard shows
+`verificationprogress` as a percentage. Expected/benign: under heavy IBD
+load this RPC call occasionally exceeds the 10s axios timeout (bitcoind's
+single validation thread is busy) — already handled gracefully
+(`getSyncStatus` catches and returns `null`, dashboard shows "—" for that
+one refresh cycle and recovers on the next). Not a bug, don't "fix" by
+raising the timeout or retrying harder — it's genuinely just bitcoind
+being busy.
+
+**New: `infra/logs-service`** — small standalone Node/`ws` service, no
+Dockerfile/dependency shared with public-pool. Tails `bitcoind`'s
+`debug.log` directly off a **read-only** mount of the `bitcoin-data`
+volume and streams new lines over a plain WebSocket. Deliberately *not*
+Docker-socket-based (ruled out something like Dozzle): granting any
+container access to `/var/run/docker.sock`, even read-only, gives it
+visibility into every other container (potentially including secrets in
+env/inspect output), which is a much bigger privilege grant than "read
+one specific log file this project already writes." One `tail -f` child
+process per connected browser (fine at this scale — personal/LAN
+dashboard, not expected to have many simultaneous viewers).
+
+**Three deploy-reliability bugs found while shipping this (all fixed):**
+
+1. **`bitcoind` healthcheck `start_period` too short.** 30s wasn't enough
+   for post-restart block-replay + RPC warmup (observed needing close to
+   2 minutes), so `public-pool`'s `condition: service_healthy` dependency
+   failed on more than one redeploy, requiring a manual
+   wait-then-`docker compose up -d` follow-up each time. Raised to 180s.
+2. **nginx caches upstream container IPs for its own container's
+   lifetime.** Plain `proxy_pass http://public-pool:3334;` resolves the
+   hostname once at nginx startup. When `public-pool` (or `logs`) gets
+   recreated by a redeploy — new container, new IP — `monitor` keeps
+   talking to the stale IP and every request 502s until `monitor` itself
+   is also restarted. Hit this exact thing right after this same
+   redeploy. Fixed properly: `resolver 127.0.0.11 valid=10s;` (Docker's
+   embedded DNS) plus a `set $upstream ...; proxy_pass $upstream;`
+   pattern, which forces nginx to re-resolve per request instead of
+   caching. `docs/DEPLOY.md`'s workflow doesn't currently mention
+   restarting `monitor` after every redeploy — with this fix it no longer
+   needs to.
+3. **Self-caught regression while fixing #2**: nginx's variable-based
+   `proxy_pass` does *not* do the same location-prefix rewriting a literal
+   `proxy_pass` target does — with a variable, the original incoming URI
+   is forwarded unmodified, so the `/api/` suffix that had been appended
+   after the variable was wrong and silently turned every request (e.g.
+   `GET /api/sync`) into `GET /api/` on the upstream. Caught by testing
+   `/api/sync` immediately after deploying, before declaring it fixed —
+   removed the suffix (public-pool's own routes are already under `/api`
+   via `setGlobalPrefix('api')`, so passing the URI through unmodified is
+   exactly correct).
+
+**Also fixed in passing**: `infra/deploy.sh`'s executable bit wasn't
+tracked in git (only set locally on the server via a one-off `chmod +x`),
+so a later `git pull` aborted with a local-changes conflict on that file
+alone. Fixed by committing the mode with `git update-index --chmod=+x`.
 
 ## Why no `.claude/` yet
 
@@ -390,6 +455,7 @@ should be turned into project skills at that point, not before.
   this whole repo, not a separate copy). See `docs/DEPLOY.md` for the
   full layout and workflow. Briefly: `docker-compose.yml`,
   `bitcoin/Dockerfile` + `.template`, `public-pool/` (git submodule, our
-  fork), `public-pool.env.template`, `monitor/index.html.template`,
-  `deploy.sh`, `env.example`. Real secrets only ever exist in a
-  gitignored `infra/.env` on the server.
+  fork), `public-pool.env.template`, `monitor/index.html.template` +
+  `nginx.conf`, `logs-service/` (live log streaming), `deploy.sh`,
+  `env.example`. Real secrets only ever exist in a gitignored
+  `infra/.env` on the server.
