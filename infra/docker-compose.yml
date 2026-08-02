@@ -26,7 +26,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # After a restart mid-IBD, bitcoind replays/rolls forward recent
+      # blocks and goes through RPC warmup (error -28 "Loading block
+      # index...") before answering — observed taking up to ~2 minutes in
+      # practice, well past a 30s start_period, which made public-pool's
+      # `depends_on: condition: service_healthy` fail on more than one
+      # redeploy. Generous on purpose; this only delays how long a
+      # redeploy takes to report success, not anything at runtime once
+      # both containers are actually up.
+      start_period: 180s
 
   public-pool:
     build:
