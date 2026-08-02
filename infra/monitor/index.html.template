@@ -110,6 +110,14 @@
     color: var(--muted); font-size: 12px; margin: 10px 0 0;
   }
 
+  .logs-box {
+    background: #05070a; border: 1px solid var(--panel-border); border-radius: 10px;
+    padding: 12px 14px; height: 280px; overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.5; color: #b8c4cf;
+    white-space: pre-wrap; word-break: break-all; margin: 0;
+  }
+
   footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
@@ -169,6 +177,12 @@
       <tr><td colspan="4" class="empty">Cargando…</td></tr>
     </tbody>
   </table>
+
+  <div class="section-head">
+    <h2>Logs del nodo (en vivo)</h2>
+    <span class="mono" id="logs-status" style="color: var(--muted); font-size: 12px;">conectando…</span>
+  </div>
+  <pre class="logs-box" id="logs-view"></pre>
 
   <footer id="footer"></footer>
 
@@ -259,10 +273,11 @@ document.getElementById("waiting-toggle").addEventListener("click", () => {
 
 async function refresh() {
   try {
-    const [poolRes, clientRes, infoRes] = await Promise.all([
+    const [poolRes, clientRes, infoRes, syncRes] = await Promise.all([
       fetch(API_BASE + "/pool").then(r => r.json()),
       fetch(API_BASE + "/client/" + encodeURIComponent(ADDRESS)).then(r => r.json()),
-      fetch(API_BASE + "/info").then(r => r.json())
+      fetch(API_BASE + "/info").then(r => r.json()),
+      fetch(API_BASE + "/sync").then(r => r.json()).catch(() => null)
     ]);
 
     const allWorkers = clientRes.workers || [];
@@ -290,6 +305,12 @@ async function refresh() {
     document.getElementById("subtitle").textContent =
       `Actualizado ${new Date().toLocaleTimeString("es-ES")} · pool en bloque ${poolRes.blockHeight ?? "—"}`;
 
+    const syncPercent = syncRes && typeof syncRes.verificationprogress === "number"
+      ? (syncRes.verificationprogress * 100).toFixed(2) + "%"
+      : "—";
+    const syncLabel = syncRes && syncRes.initialblockdownload === false
+      ? "Nodo sincronizado" : "Sincronización del nodo";
+
     const totalsHtml = `
       <div class="tile"><div class="label">Tu hashrate</div><div class="value accent">${formatHashRate(liveTotalHashRate)}</div></div>
       <div class="tile"><div class="label">Tu máximo alcanzado</div><div class="value">${formatHashRate(newMax)}</div></div>
@@ -297,6 +318,7 @@ async function refresh() {
       <div class="tile"><div class="label">En espera</div><div class="value">${onlineWaitingCount}</div></div>
       <div class="tile"><div class="label">Tus bloques</div><div class="value">${blocksForAddress}</div></div>
       <div class="tile"><div class="label">Altura de bloque (pool)</div><div class="value">${poolRes.blockHeight ?? "—"}</div></div>
+      <div class="tile"><div class="label">${syncLabel}</div><div class="value accent">${syncPercent}</div></div>
     `;
     document.getElementById("totals").innerHTML = totalsHtml;
 
@@ -352,6 +374,38 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, REFRESH_MS);
+
+// Live bitcoind log stream. nginx proxies /logs-ws to a small dedicated
+// service that tails debug.log directly (no Docker socket access) — see
+// infra/logs-service/.
+const MAX_LOG_LINES = 500;
+const logsView = document.getElementById("logs-view");
+const logsStatus = document.getElementById("logs-status");
+let logLines = [];
+
+function connectLogs() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(proto + "//" + location.host + "/logs-ws");
+
+  ws.onopen = () => { logsStatus.textContent = "en vivo"; };
+
+  ws.onmessage = (ev) => {
+    const wasAtBottom = logsView.scrollTop + logsView.clientHeight >= logsView.scrollHeight - 10;
+    logLines.push(ev.data);
+    if (logLines.length > MAX_LOG_LINES) logLines.shift();
+    logsView.textContent = logLines.join("\n");
+    if (wasAtBottom) logsView.scrollTop = logsView.scrollHeight;
+  };
+
+  ws.onclose = () => {
+    logsStatus.textContent = "desconectado, reintentando…";
+    setTimeout(connectLogs, 3000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+connectLogs();
 </script>
 
 </body>
