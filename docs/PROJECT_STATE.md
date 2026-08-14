@@ -72,9 +72,15 @@ session.
 - **Payout address**: resolved. Provided by Carlos on 2026-08-01, verified
   locally (bech32 checksum valid, mainnet, P2WPKH), and wired into
   production's local, gitignored `infra/.env` — see `local.access.md`.
-  Deliberately NOT stored anywhere in this repo or in git history, since
-  the repo is public — publishing a real payout address would link it to
-  Carlos's identity for no benefit.
+  **Correction (2026-08-14)**: this file itself has, since 2026-08-01,
+  quoted the real address in plain text in the "Bug found and fixed"
+  section below (as a worked example while debugging) — so despite the
+  intent above, it has in fact been public in this repo's git history the
+  whole time. Flagged to Carlos; he confirmed explicitly he does not mind
+  the address being linkable to him. **Do not treat this as a bug to
+  silently fix** — rewriting public git history is a separate, riskier
+  decision Carlos would need to make explicitly, and he has already
+  chosen not to.
 - **Production machine**: decided — **Ubuntu Server 26.04 LTS** ("Resolute
   Raccoon"), headless, everything run via Docker Compose. Access model: SSH
   over the home LAN only (no port forwarding / no internet-facing exposure)

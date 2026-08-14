@@ -10,7 +10,7 @@ commit here, `git pull` there, run the deploy script.
 
 ```
 infra/
-  docker-compose.yml         # 3 services: bitcoind, public-pool, monitor
+  docker-compose.yml         # 4 services: bitcoind, public-pool, logs, monitor
   env.example                 # copy to .env on the server, fill in real values
   deploy.sh                   # renders templates from .env, then docker compose up -d --build
   bitcoin/
@@ -19,8 +19,11 @@ infra/
   public-pool.env.template     # rendered to public-pool/.env (gitignored)
   public-pool/                 # git submodule -> github.com/CarlosPoggio/public-pool
                                 # (our fork, upstream + a small patch, see below)
+  logs-service/                 # small Node/ws server streaming bitcoind's debug.log
+                                 # to the dashboard's log viewer, read-only volume mount
   monitor/
     index.html.template        # rendered to index.html (gitignored, has the real wallet address)
+    nginx.conf                  # reverse proxy: /api/ -> public-pool, /logs-ws -> logs-service
 ```
 
 Nothing under `infra/` that's gitignored contains real secrets in git —
@@ -48,6 +51,18 @@ rendered, real-value files live only on the server.
    so it survives regardless of directory/project naming) is untouched by
    this, so recreating that container does **not** restart the blockchain
    sync from zero.
+   - **When only one service actually changed** (e.g. a `public-pool`
+     patch), prefer a scoped rebuild instead of the full `deploy.sh`:
+     `docker compose build <service> && docker compose up -d <service>`.
+     `deploy.sh` runs `docker compose up -d --build` for *every* service,
+     including `bitcoind`, whose `Dockerfile` does a live `apt-get` —
+     observed failing once on a transient network/DNS hiccup unrelated to
+     the actual change being deployed. Scoping the build avoids that, and
+     is faster besides. Confirm with `docker compose ps` afterward that
+     `bitcoind` wasn't unexpectedly recreated (Compose can still restart a
+     dependency of the service you touched); if it was, it comes back
+     healthy on its own within `start_period` (180s) — not a problem, just
+     worth noticing.
 
 ## Changing public-pool itself
 
