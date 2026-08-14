@@ -429,6 +429,93 @@ tracked in git (only set locally on the server via a one-off `chmod +x`),
 so a later `git pull` aborted with a local-changes conflict on that file
 alone. Fixed by committing the mode with `git update-index --chmod=+x`.
 
+## NerdMiner v2 support: two real bugs found and fixed (2026-08-14)
+
+A NerdMiner v2 (ESP32-2432S028_2USB board, ~54 KH/s, firmware
+`NerdMinerV2/V1.7.0`) was added alongside the three Bitaxes. It connected
+and received work, but stayed at 0 accepted shares indefinitely. Root
+cause turned out to be **two independent bugs**, one in our pool fork and
+one in the miner's own firmware — fixing only one would not have been
+enough.
+
+**Bug 1 (pool side): default starting difficulty (100,000) never actually
+reached this device.** `public-pool`'s automatic vardiff
+(`checkDifficulty()`, `StratumV1ClientStatistics.getSuggestedDifficulty()`)
+is designed to ramp difficulty down to `MIN_DIFF = 0.00001` within
+~12-13 minutes of a worker submitting nothing — verified by hand-tracing
+the math. In practice the NerdMiner ran for 5h49m (and, in an earlier
+session, 5 days) with 0 shares, meaning the live-pushed
+`mining.set_difficulty` updates were never taking effect on the device.
+Fixed the same way the code already special-cases `cpuminer`: added a
+`case 'NerdMiner':` branch in `StratumV1Client.ts`'s `initStratum()`
+that sets a low fixed difficulty (0.001) from the very first message,
+instead of relying on a later live update ever landing.
+
+**Bug 2 (pool side, the real blocker): malformed `extraNonce2` accepted
+by validation, silently corrupting every share.** Captured raw stratum
+traffic with `tcpdump` and found the NerdMiner sending `extraNonce2` as
+a **space-padded value** (e.g. `"               6"`) instead of
+zero-padded hex. `MiningSubmitMessage.ts` only validated the string
+*length* (`@Length(16,16)`), not that it was valid hex, so the malformed
+value passed validation — then `Buffer.from(hex)` downstream silently
+stopped at the first invalid (space) character, corrupting the
+reconstructed coinbase/header. Result: **every** submission was rejected
+as `"Difficulty too low"`, regardless of the actual difficulty setting.
+Root cause of the malformed value, found afterward by cloning the
+NerdMiner_v2 firmware source (`src/utils.cpp`, `getNextExtranonce2()`):
+a C format-string construction bug (`sprintf(&format[1], "%02dx", ...)`
+overwrites the zero-flag it meant to keep, producing `"%16x"` — space-padded
+— instead of the intended `"%016x"` zero-padded format). Fixed on the pool
+side (can't patch firmware on someone else's hardware in general) by
+re-encoding non-hex-but-all-decimal `extraNonce2` values as proper
+zero-padded hex in the `@Transform` step, before validation/hashing sees
+them. This is what actually got shares flowing.
+
+Both fixes are in the `infra/public-pool` fork (commits
+`fix: give NerdMiner v2 a low fixed starting difficulty` and
+`fix: tolerate NerdMiner's space-padded decimal extraNonce2`), submodule
+pointer bumped in this repo, deployed by rebuilding/recreating only the
+`public-pool` container (`docker compose build public-pool && docker
+compose up -d public-pool`) — no need to touch `bitcoind`.
+
+**Also fixed: the miner's own on-screen "pool stats" panel** (workers
+count, best difficulty) was silently querying the public `public-pool.io`
+API instead of our own pool, because `NerdMiner_v2`'s `getPoolAPIUrl()`
+(`src/monitor.cpp`) only special-cases a handful of known pool
+addresses/ports and falls back to the hardcoded public API for anything
+else — our `192.168.1.2:3333` didn't match any case. This one required
+building and flashing custom firmware (the miner's own screen can't be
+fixed from the pool side):
+- Toolchain installed on the dev machine (previously had none): Python
+  3.13.15 (official installer, all-users) + PlatformIO Core, both via
+  `pip`. The USB-serial chip (CH340, needed to flash over the miner's
+  micro-USB port) needed its driver installed via Device Manager →
+  "Update driver" → search automatically (Windows reports "already up to
+  date" even when it just silently installed the missing driver — the
+  UI message is misleading, check `Get-PnpDevice` if in doubt).
+- Firmware source: `github.com/BitMaker-hub/NerdMiner_v2`, tag
+  `nerdminer-release-V1.7.0` (matches the exact version string the device
+  reports over serial: `NerdMinerV2/V1.7.0`). Board environment
+  `ESP32_2432S028_2USB` in `platformio.ini` (matches the board's two USB
+  connectors — USB-C for power only, micro-USB wired to the CH340 for
+  data/flashing; the separate 2-pin connector on these boards is a LiPo
+  battery connector, unrelated to USB).
+  **Gotcha**: PlatformIO's dependency install fails with Windows path/
+  filename-length errors if the project lives under a deeply nested path
+  (this repo's own directory structure was too deep) — had to build from
+  a short path instead (`C:\nm2`, kept on this dev machine for any future
+  re-flash; not part of this git repo).
+- One-line fix in `src/monitor.cpp`'s `getPoolAPIUrl()`: added an
+  `else if (Settings.PoolAddress == "192.168.1.2")` case pointing at
+  `http://192.168.1.2:3334/api/client/` (public-pool's own JSON API,
+  which already returns exactly the fields this function expects —
+  `bestDifficulty`, `workersCount`, `workers[].hashRate` — no pool-side
+  changes needed). Built and flashed with `pio run -e
+  ESP32_2432S028_2USB --target upload --upload-port COM3`. Confirmed via
+  serial log after reflashing: `poolAPIUrl:
+  http://192.168.1.2:3334/api/client/` and `Pool API : ... Pool Data
+  OK!`.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
