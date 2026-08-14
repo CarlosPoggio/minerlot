@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-01
+Last updated: 2026-08-14
 
 This file is the continuity single source of truth for Minerlot. Any Claude
 Code session — on this machine or a fresh clone elsewhere — should read this
@@ -20,22 +20,37 @@ session.
   up to date as of 2026-08-01, no reboot pending.
 - **Bitcoin Core, public-pool, and a monitoring dashboard are deployed and
   running** on the production server, in `/opt/minerlot` (Docker Compose,
-  three containers: `minerlot-bitcoind`, `minerlot-public-pool`,
-  `minerlot-monitor`). See "Bitcoin node + pool deployment" and
-  "Monitoring dashboard" below for full details. Bitcoin Core is still
-  doing its initial block download (started 2026-08-01) — the pool cannot
-  produce valid work until that finishes.
+  four containers: `minerlot-bitcoind`, `minerlot-public-pool`,
+  `minerlot-logs`, `minerlot-monitor`). See "Bitcoin node + pool
+  deployment" and "Monitoring dashboard" below for full details.
+  **Bitcoin Core is fully synced** (`initialblockdownload: false`,
+  `verificationprogress: 1`, confirmed 2026-08-14) — the pool has been
+  producing valid work for all connected devices for some time.
+- **The entire server deployment lives in this git repo** (`infra/`,
+  secrets excluded) — see "Server deployment moved into git" below.
+  Shipping an update is `git pull` + `infra/deploy.sh` (or a scoped
+  `docker compose build <service> && docker compose up -d <service>` when
+  only one container needs rebuilding, to avoid an unrelated `bitcoind`
+  rebuild/restart — see the NerdMiner section for why that matters).
+- **Four mining devices connected and actively producing accepted
+  shares**: three Bitaxes (workers `naranja`, `negro`, `nocarcasa`) and
+  one NerdMiner v2 (worker `Nerd`, ESP32-2432S028_2USB board, ~54 KH/s).
+  The NerdMiner needed two pool-side bugfixes and one firmware fix before
+  it worked — see "NerdMiner v2 support" below; that section also has the
+  now-installed firmware build toolchain on this dev machine (Python +
+  PlatformIO) in case another device needs the same treatment.
 - **Server confirmed safe to run fully headless**: no monitor, keyboard,
   or USB stick attached — it boots and runs entirely from its internal
   NVMe disk (verified via `findmnt` / `lsblk`, the OS is on `nvme0n1p2`,
   the install USB shows up as an untouched separate `sda` device). Power
   + Ethernet only is enough going forward.
-- **Pending on Carlos (needs physical access, cannot be done remotely)**:
-  enable "power on after AC power loss" in the BIOS, so the server
-  restarts itself automatically after a power cut. This lives in
+- **Still pending on Carlos (needs physical access, cannot be done
+  remotely)**: enable "power on after AC power loss" in the BIOS, so the
+  server restarts itself automatically after a power cut. This lives in
   firmware/NVRAM below the OS, so it can't be set over SSH. See "Next
-  steps" for exact guidance.
-- No Bitaxe device connected yet.
+  steps" for exact guidance. No confirmation yet that this has been done.
+- Public, fee-based pool is planned but deliberately not started — see
+  `docs/ROADMAP_PUBLIC_POOL.md`.
 - No `.claude/` project skills or subagents (see "Why no `.claude/` yet"
   below).
 
@@ -54,15 +69,12 @@ session.
 
 ## Open questions / pending on the human
 
-- **Payout address**: provided by Carlos on 2026-08-01, verified locally
-  (bech32 checksum valid, mainnet, P2WPKH — standard single-sig segwit
-  address). Deliberately NOT stored anywhere in this repo, since the repo
-  is public — publishing a real payout address publicly would link it to
-  Carlos's identity for no benefit. It will be wired directly into
-  public-pool's local, gitignored config once that service is installed on
-  the production machine. Whoever picks this up next: ask Carlos to
-  re-supply it at that point if it isn't already sitting in a local
-  untracked file.
+- **Payout address**: resolved. Provided by Carlos on 2026-08-01, verified
+  locally (bech32 checksum valid, mainnet, P2WPKH), and wired into
+  production's local, gitignored `infra/.env` — see `local.access.md`.
+  Deliberately NOT stored anywhere in this repo or in git history, since
+  the repo is public — publishing a real payout address would link it to
+  Carlos's identity for no benefit.
 - **Production machine**: decided — **Ubuntu Server 26.04 LTS** ("Resolute
   Raccoon"), headless, everything run via Docker Compose. Access model: SSH
   over the home LAN only (no port forwarding / no internet-facing exposure)
@@ -92,25 +104,25 @@ session.
 
 ## Next steps
 
+Everything on the original bring-up checklist is done: node fully synced,
+four devices connected and mining, dashboard built out (sync %, log
+viewer, per-address lookup, waiting-miners view), whole deployment
+git-managed. What's actually left:
+
 1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
    Lenovo boot logo, unless the boot screen says otherwise) and find
    **Power → After Power Loss** (exact wording may vary slightly by BIOS
    version), set it to **Power On**. This cannot be done remotely — it's
-   firmware-level, below the OS. Nothing else on the checklist depends on
-   this; it's just resilience against power cuts.
-2. Wait for Bitcoin Core's initial block download to finish (started
-   2026-08-01; pruned mode does not make this faster — every block is
-   still fully validated from genesis, only old ones get deleted
-   afterward). Realistically hours, not minutes. Check progress with
-   `docker exec minerlot-bitcoind bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=minerlot -rpcpassword=<see local.access.md> getblockchaininfo`.
-3. Once synced, confirm the already-connected Bitaxe ("naranja", see bug
-   note below) starts submitting accepted shares and shows up in the
-   "Minando activamente" table on the monitoring dashboard
-   (`http://192.168.1.2/`) with live hashrate.
-4. Optional follow-up, not done yet: deploy `public-pool-ui` (a separate
-   Angular/Caddy project) for a fancier dashboard than the custom one
-   already built. Low priority now that `minerlot-monitor` covers the
-   actual requirements.
+   firmware-level, below the OS. Not urgent (nothing else depends on it),
+   but not confirmed done either — check with Carlos before assuming.
+2. Optional follow-up, not done and not prioritized: deploy
+   `public-pool-ui` (a separate Angular/Caddy project) for a fancier
+   dashboard than the custom one already built. Low priority now that
+   `minerlot-monitor` covers the actual requirements.
+3. Explicitly deferred, roadmap-only, do not start without Carlos asking:
+   opening the pool to the internet with a 2% fee — see
+   `docs/ROADMAP_PUBLIC_POOL.md` for the plan and the open security
+   questions already talked through (port exposure, dashboard privacy).
 
 ## Bitcoin node + pool deployment (2026-08-01)
 
