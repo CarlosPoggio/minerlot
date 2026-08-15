@@ -42,10 +42,11 @@ session.
 - **NerdMiner's on-device screen was rewritten from scratch** (2026-08-15):
   instead of its original 4 built-in screens, it now shows one custom
   "pool overview" screen — every worker on the pool, hashrate, uptime,
-  status dot, blocks found, plus a prominent totals area. **Read "NerdMiner
-  rewritten to a single pool-overview screen" below before touching this
-  again — the firmware source lives only on this dev machine
-  (`C:\nm2`), not in this git repo, and is not backed up anywhere.**
+  status dot, blocks found, plus a prominent totals area. Source is now
+  backed up as a real fork, `github.com/CarlosPoggio/NerdMiner_v2`,
+  branch `minerlot` — see "NerdMiner rewritten to a single
+  pool-overview screen" below for the full story and "NerdMiner firmware
+  fork created" for where it lives and how to update it.
 - **Dashboard gained two new sections** (2026-08-15): a live table of the
   last 50 blocks found on the whole Bitcoin network (pool, payout
   address, reward), and a "solo-mined blocks" section highlighting which
@@ -144,19 +145,11 @@ What's actually left:
    version), set it to **Power On**. This cannot be done remotely — it's
    firmware-level, below the OS. Not urgent (nothing else depends on it),
    but not confirmed done either — check with Carlos before assuming.
-2. **Recommended, not yet done**: the NerdMiner firmware changes
-   (single pool-overview screen, see below) live only as uncommitted
-   files on this dev machine at `C:\nm2` — no fork exists on GitHub, so
-   unlike `public-pool` this customization has **no backup anywhere**.
-   Consider forking `github.com/BitMaker-hub/NerdMiner_v2` to
-   `github.com/CarlosPoggio/NerdMiner_v2` (same pattern already used for
-   `public-pool`) and committing the current `C:\nm2` diff there, so a
-   lost/wiped dev machine wouldn't mean redoing this from scratch.
-3. Optional follow-up, not done and not prioritized: deploy
+2. Optional follow-up, not done and not prioritized: deploy
    `public-pool-ui` (a separate Angular/Caddy project) for a fancier
    dashboard than the custom one already built. Low priority now that
    `minerlot-monitor` covers the actual requirements.
-4. Explicitly deferred, roadmap-only, do not start without Carlos asking:
+3. Explicitly deferred, roadmap-only, do not start without Carlos asking:
    opening the pool to the internet with a 2% fee — see
    `docs/ROADMAP_PUBLIC_POOL.md` for the plan and the open security
    questions already talked through (port exposure, dashboard privacy).
@@ -636,17 +629,14 @@ worker on the same pool+wallet — name, hashrate, uptime, an online/offline
 status dot, blocks found — plus a large, prominent totals area (combined
 hashrate, total blocks, active-worker count).
 
-**Where this lives — read before touching it again**: the firmware
-source is a local-only clone at `C:\nm2` on this dev machine (tag
-`nerdminer-release-V1.7.0` of `github.com/BitMaker-hub/NerdMiner_v2`,
-upstream, not a fork). All changes described here are **uncommitted
-working-tree edits on that one machine** — there is no git history, no
-fork, no backup anywhere else. The device itself has already been
-flashed with the built result (`pio run -e ESP32_2432S028_2USB --target
-upload --upload-port COM3`, confirmed working over serial), so the
-*running* firmware is safe, but the *source* only exists as files on
-this PC. See "Next steps" above for the recommended fix (fork it to
-GitHub like `public-pool` was).
+**Where this lives**: at the time these changes were made, the firmware
+source was a local-only clone at `C:\nm2` with uncommitted edits and no
+backup anywhere — since fixed, see "NerdMiner firmware fork created"
+below for where it lives now (`github.com/CarlosPoggio/NerdMiner_v2`,
+branch `minerlot`) and how to update it going forward. The device itself
+has already been flashed with the built result (`pio run -e
+ESP32_2432S028_2USB --target upload --upload-port COM3`, confirmed
+working over serial).
 
 **Backend dependency**: this screen consumes the `blocksFound`/`online`/
 `uptime` fields added to `GET /api/client/:address` in the section above
@@ -771,6 +761,41 @@ service from `docker-compose.yml` leaves its old container running
 untracked instead of stopping it (this bit during the earlier
 sync-%/log-viewer removal, when the `logs` container kept running after
 its service entry was deleted).
+
+## NerdMiner firmware fork created (2026-08-15)
+
+The pool-overview screen rewrite (previous section) started life as
+uncommitted local edits with no backup anywhere — fixed by forking it
+properly, the same pattern already established for `public-pool`:
+
+- Forked `github.com/BitMaker-hub/NerdMiner_v2` to
+  `github.com/CarlosPoggio/NerdMiner_v2` via `gh repo fork`.
+- On the local clone at `C:\nm2`: renamed the existing `origin` remote
+  (upstream) to `upstream`, added the fork as the new `origin`. Created
+  a branch named `minerlot` off the `nerdminer-release-V1.7.0` tag (the
+  clone was in detached-HEAD state, checked out at that tag — a branch
+  was needed before anything could be pushed), committed both
+  customizations there (the `getPoolAPIUrl()` pool-URL patch and the
+  full pool-overview screen rewrite) as a single commit, and pushed
+  `minerlot` to `origin` (the fork).
+- **To pull in new upstream NerdMiner_v2 changes later**: from `C:\nm2`,
+  `git fetch upstream && git rebase upstream/main` (upstream's default
+  branch is `main`, not `master`) while on the `minerlot` branch,
+  resolve any conflicts with our two customizations, then
+  `git push origin minerlot` (force-push likely needed after a rebase —
+  fine here, `minerlot` is a solo working branch, not shared).
+- **To change the customization itself**: edit directly in `C:\nm2` on
+  the `minerlot` branch, commit (conventional commits, no AI
+  attribution, same as everywhere else), `git push origin minerlot`,
+  then rebuild/reflash
+  (`pio run -e ESP32_2432S028_2USB --target upload --upload-port COM3`).
+- This fork is **not** a git submodule of this repo (unlike
+  `infra/public-pool`) — the NerdMiner firmware isn't part of the server
+  deployment, it's a standalone Arduino/PlatformIO project flashed onto
+  a physical device from this dev machine. `C:\nm2` remains outside this
+  repo's directory tree (kept short intentionally — see the "NerdMiner
+  v2 support" section above for why nesting depth broke PlatformIO's
+  dependency install).
 
 ## Why no `.claude/` yet
 
