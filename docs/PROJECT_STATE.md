@@ -797,6 +797,77 @@ properly, the same pattern already established for `public-pool`:
   v2 support" section above for why nesting depth broke PlatformIO's
   dependency install).
 
+## NerdMiner pool-overview screen refined: colors, LED, layout (2026-08-15)
+
+Follow-up round of fixes/tweaks on top of the initial pool-overview
+screen, all requested after seeing the device in person. Committed to
+the fork's `minerlot` branch (`7192982`), on top of the initial rewrite
+commit (`4bd22ab`).
+
+**Inverted panel colors.** The screen was rendering backwards — white
+background, black text — despite the code drawing a near-black
+background and white text. This board's firmware already has a
+purpose-built setting for exactly this
+(`Settings.invertColors`/`tft.invertDisplay()`, exposed as an "Invert
+Display Colors (if the colors look weird)" checkbox in the WiFiManager
+captive portal) — but relying on it would depend on whatever's already
+persisted in this specific device's SPIFFS config, and that field
+defaults to `false` and gets explicitly reset to `false` if missing from
+the saved JSON (`nvMemory.cpp`'s `loadConfig()`). Fixed by forcing
+`invertColors = true` unconditionally right after `loadConfig()` in
+`esp32_2432S028R_Init()` (`esp23_2432s028r.cpp`), overriding whatever was
+loaded — this specific physical panel always needs it, so there's no
+scenario where the WiFiManager checkbox should ever do anything
+different.
+
+**Status LED disabled.** The board's onboard RGB LED (`LED_PIN`=GPIO4/
+red, `LED_PIN_B`=GPIO16, `LED_PIN_G`=GPIO17, active-low) was blinking red
+continuously while hashing (and red/blue while connecting) — a
+`switch (mMonitor.NerdStatus)` block in `esp32_2432S028R_DoLedStuff()`
+that most of this codebase's boards use as a mining-activity indicator.
+Requested off permanently: removed that switch block entirely, and
+changed the initial `pinMode`/`digitalWrite` setup to hold all three
+pins `HIGH` (off) from boot instead of turning the red one on
+immediately.
+
+**Per-worker table redesign**, in three rounds after each was seen live:
+- Replaced the per-worker blocks-found number with the worker's
+  **shares count** (`sharesCount`, already available from the pool API,
+  just wasn't parsed/shown before) — blocks found is astronomically rare
+  per worker, shares are what actually confirms "this device is really
+  working." The blocks-found data isn't gone, just repurposed: any
+  worker with `blocksFound > 0` now gets a thin accent-colored bar at the
+  left edge of its row (same visual language as the web dashboard's
+  "TUYO" left-border highlight) instead of a numeric column. The total
+  blocks-found readout at the top of the screen is untouched.
+- Hashrate went from the full `suffix_string()` output with a `H/s` unit
+  (e.g. `"265.484 GH/s"`) → unit-only, no `H/s` (`"265.484 G"`) → finally
+  integer-only, no decimals (`"265 G"`) — each step freeing more of the
+  row's limited horizontal budget for the new shares column.
+- Column x-positions were moved twice after the previous attempt visibly
+  overlapped adjacent columns on the real screen (uptime moved
+  155→172, hashrate moved 230→235) — not something that could be
+  verified by compiling alone, only by looking at the physical device
+  after each flash.
+
+**Uptime format bounded to 7 characters**, backend-side (this lives in
+`formatUptime()`, `infra/public-pool/src/controllers/client/client.controller.ts`
+— **not** in the firmware, the firmware just displays whatever string
+the API sends; submodule commit `9507280`, deployed with the usual
+scoped `public-pool`-only rebuild, `bitcoind` untouched):
+- Under 24h: unchanged, e.g. `"5h 49m"` / `"12m"`.
+- 24h–30 days: switches to zero-padded `DDdHHh` (days+hours only, no
+  minutes), e.g. `"02d14h"`.
+- 30+ days: switches to zero-padded `MMMdDDd` (months as fixed 30-day
+  blocks + remainder days), e.g. `"003M05d"` — months are capped at 3
+  digits and **deliberately never roll over into years**.
+This was needed because the row's uptime column has a hard, narrow pixel
+budget on a 320px-wide screen shared with three other columns — an
+unbounded duration string (e.g. `"45d 3h 22m"`) would eventually overflow
+it no matter where the column sits. The web dashboard's own duration
+display is untouched — it computes its own independently from
+`startTime` client-side, doesn't consume this `uptime` API field at all.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
