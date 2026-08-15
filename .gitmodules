@@ -1,0 +1,3 @@
+[submodule "infra/public-pool"]
+	path = infra/public-pool
+	url = https://github.com/CarlosPoggio/public-pool.git

@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minerlot — Panel de minado</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --panel-border: #232d38;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #f7931a;
+    --good: #3fb950;
+    --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  body { padding: 24px 32px 40px; }
+  h1 {
+    font-size: 22px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h1 .dot { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  .search-bar {
+    display: flex; gap: 8px; margin-bottom: 24px; max-width: 640px;
+  }
+  .search-bar input {
+    flex: 1; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 10px 12px; color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+  }
+  .search-bar input:focus { outline: none; border-color: var(--accent); }
+  .search-bar button {
+    background: var(--accent); color: #0b0f14; border: none;
+    border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  .search-bar button:hover { opacity: 0.9; }
+  .search-error { color: var(--bad); font-size: 13px; margin: -16px 0 20px; }
+
+  .totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .tile .label {
+    font-size: 12px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin-bottom: 6px;
+  }
+  .tile .value {
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .tile .value.accent { color: var(--accent); }
+
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 10px; overflow: hidden;
+  }
+  thead th {
+    text-align: left; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); font-weight: 600;
+    padding: 12px 14px; border-bottom: 1px solid var(--panel-border);
+  }
+  tbody td {
+    padding: 12px 14px; font-size: 14px; border-bottom: 1px solid var(--panel-border);
+    font-variant-numeric: tabular-nums;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+  .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .status-dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .status-dot.off { background: var(--bad); }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .addr { color: var(--muted); cursor: help; }
+  .empty { color: var(--muted); text-align: center; padding: 40px !important; }
+
+  .section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 28px 0 10px;
+  }
+  .section-head h2 { font-size: 15px; margin: 0; color: var(--text); }
+
+  button.toggle {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.toggle:hover { border-color: var(--accent); }
+
+  .waiting-note {
+    color: var(--muted); font-size: 12px; margin: 10px 0 0;
+  }
+
+  tbody tr.mine { box-shadow: inset 3px 0 0 var(--accent); }
+  .badge-mine {
+    background: var(--accent); color: #0b0f14; font-size: 11px; font-weight: 700;
+    border-radius: 6px; padding: 2px 6px; margin-left: 6px;
+  }
+  .badge-solo {
+    background: var(--good); color: #0b0f14; font-size: 11px; font-weight: 700;
+    border-radius: 6px; padding: 2px 6px; margin-left: 6px;
+  }
+
+  footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+  <h1><span class="dot">●</span> Minerlot — Panel de minado</h1>
+  <div class="subtitle" id="subtitle">Cargando…</div>
+
+  <div class="search-bar">
+    <input type="text" id="address-input" placeholder="Tu dirección de Bitcoin (bc1q...)" spellcheck="false" autocomplete="off">
+    <button id="search-btn">Ver mis mineros</button>
+  </div>
+  <div class="search-error" id="search-error" style="display:none;"></div>
+
+  <div class="totals" id="totals"></div>
+
+  <div class="section-head">
+    <h2>Minando activamente</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Estado</th>
+        <th>Nombre</th>
+        <th>Hashrate</th>
+        <th>IP</th>
+        <th>Activo desde</th>
+        <th>Mejor dificultad</th>
+        <th>Contribuciones</th>
+        <th>Bloques</th>
+      </tr>
+    </thead>
+    <tbody id="workers-body">
+      <tr><td colspan="8" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-head">
+    <h2>Conectados, en espera</h2>
+    <button class="toggle" id="waiting-toggle">Ver mineros en espera (0)</button>
+  </div>
+  <div class="waiting-note">
+    Se conectaron correctamente pero todavía no reciben trabajo real —
+    normalmente porque el nodo de Bitcoin sigue sincronizando (ver
+    docs/CONECTAR_MINERO.md). No es un error del minero.
+  </div>
+  <table id="waiting-table" style="margin-top: 10px; display: none;">
+    <thead>
+      <tr>
+        <th>Estado</th>
+        <th>Nombre</th>
+        <th>IP</th>
+        <th>Conectado desde</th>
+      </tr>
+    </thead>
+    <tbody id="waiting-body">
+      <tr><td colspan="4" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-head">
+    <h2>Últimos bloques de la red</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Altura</th>
+        <th>Hora</th>
+        <th>Pool</th>
+        <th>Dirección de pago</th>
+        <th>Recompensa</th>
+        <th>Transacciones</th>
+      </tr>
+    </thead>
+    <tbody id="recent-blocks-body">
+      <tr><td colspan="6" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-head">
+    <h2>Bloques minados en solitario (últimos ~1000 bloques)</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Altura</th>
+        <th>Hora</th>
+        <th>Pool</th>
+        <th>Dirección de pago</th>
+        <th>Recompensa</th>
+      </tr>
+    </thead>
+    <tbody id="solo-blocks-body">
+      <tr><td colspan="5" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
+  <footer id="footer"></footer>
+
+<script>
+// Same-origin: nginx proxies /api/ to the public-pool container internally
+// (see infra/monitor/nginx.conf), so this works unchanged whether reached
+// via the LAN IP or, later, via a public domain.
+const API_BASE = "/api";
+const REFRESH_MS = 5000;
+const DEFAULT_ADDRESS = "${WALLET_ADDRESS}";
+
+let ADDRESS = new URLSearchParams(location.search).get("address") || DEFAULT_ADDRESS;
+document.getElementById("address-input").value = ADDRESS;
+
+function isValidBitcoinAddress(addr) {
+  // Loose client-side sanity check, not a full validator — the API call
+  // itself is the real source of truth (it'll just return an empty
+  // workers list for a well-formed but unknown/invalid address).
+  return typeof addr === "string" && addr.length >= 26 && addr.length <= 62 && /^[a-zA-Z0-9]+$/.test(addr);
+}
+
+function goToAddress(addr) {
+  addr = addr.trim();
+  if (!isValidBitcoinAddress(addr)) {
+    const err = document.getElementById("search-error");
+    err.textContent = "Esa no parece una dirección de Bitcoin válida.";
+    err.style.display = "block";
+    return;
+  }
+  document.getElementById("search-error").style.display = "none";
+  ADDRESS = addr;
+  const url = new URL(location.href);
+  url.searchParams.set("address", addr);
+  history.pushState({}, "", url);
+  localStorage.setItem("minerlot_last_address", addr);
+  refresh();
+  refreshRecentBlocks();
+  refreshSoloBlocks();
+}
+
+document.getElementById("search-btn").addEventListener("click", () => {
+  goToAddress(document.getElementById("address-input").value);
+});
+document.getElementById("address-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") goToAddress(e.target.value);
+});
+
+function formatHashRate(hashesPerSecond) {
+  if (!hashesPerSecond || hashesPerSecond <= 0) return "0 H/s";
+  const units = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s"];
+  let v = hashesPerSecond, i = 0;
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  return v.toFixed(2) + " " + units[i];
+}
+
+function formatDuration(startIso) {
+  if (!startIso) return "—";
+  const start = new Date(startIso).getTime();
+  const diffSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+  const d = Math.floor(diffSec / 86400);
+  const h = Math.floor((diffSec % 86400) / 3600);
+  const m = Math.floor((diffSec % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(d + "d");
+  if (h || d) parts.push(h + "h");
+  parts.push(m + "m");
+  return parts.join(" ");
+}
+
+function isOnline(lastSeenIso) {
+  if (!lastSeenIso) return false;
+  return (Date.now() - new Date(lastSeenIso).getTime()) < 150 * 1000;
+}
+
+function formatIp(ip) {
+  if (!ip) return "—";
+  return ip.replace(/^::ffff:/, "");
+}
+
+function countBlocksForWorker(blockData, address, workerName) {
+  if (!Array.isArray(blockData)) return 0;
+  return blockData.filter(b => b.minerAddress === address && b.worker === workerName).length;
+}
+
+function truncateAddr(addr) {
+  if (!addr) return "—";
+  if (addr.length <= 20) return addr;
+  return addr.slice(0, 10) + "…" + addr.slice(-6);
+}
+
+function formatBtc(rewardBtc) {
+  if (typeof rewardBtc !== "number") return "—";
+  return rewardBtc.toFixed(4) + " BTC";
+}
+
+let waitingVisible = false;
+document.getElementById("waiting-toggle").addEventListener("click", () => {
+  waitingVisible = !waitingVisible;
+  document.getElementById("waiting-table").style.display = waitingVisible ? "table" : "none";
+});
+
+async function refresh() {
+  try {
+    const [poolRes, clientRes, infoRes] = await Promise.all([
+      fetch(API_BASE + "/pool").then(r => r.json()),
+      fetch(API_BASE + "/client/" + encodeURIComponent(ADDRESS)).then(r => r.json()),
+      fetch(API_BASE + "/info").then(r => r.json())
+    ]);
+
+    const allWorkers = clientRes.workers || [];
+    // A worker only counts as "actively mining" once it has at least one
+    // accepted share. Until then it's "connected, waiting" — typically
+    // because bitcoind is still syncing and can't hand out real work yet
+    // (see docs/CONECTAR_MINERO.md).
+    const activeWorkers = allWorkers.filter(w => (w.sharesCount || 0) > 0);
+    const waitingWorkers = allWorkers.filter(w => (w.sharesCount || 0) === 0);
+
+    const liveTotalHashRate = activeWorkers.reduce((sum, w) => sum + (w.hashRate || 0), 0);
+    const blocksForAddress = (poolRes.blocksFound || []).filter(b => b.minerAddress === ADDRESS).length;
+
+    // Client-side running max, persisted per-address across reloads on
+    // this browser (different addresses looked up on the same browser
+    // don't mix their maxes together).
+    const maxHrKey = "minerlot_max_hashrate_" + ADDRESS;
+    const storedMax = parseFloat(localStorage.getItem(maxHrKey) || "0");
+    const newMax = Math.max(storedMax, liveTotalHashRate);
+    if (newMax > storedMax) localStorage.setItem(maxHrKey, String(newMax));
+
+    const onlineActiveCount = activeWorkers.filter(w => isOnline(w.lastSeen)).length;
+    const onlineWaitingCount = waitingWorkers.filter(w => isOnline(w.lastSeen)).length;
+
+    document.getElementById("subtitle").textContent =
+      `Actualizado ${new Date().toLocaleTimeString("es-ES")} · pool en bloque ${poolRes.blockHeight ?? "—"}`;
+
+    const totalsHtml = `
+      <div class="tile"><div class="label">Tu hashrate</div><div class="value accent">${formatHashRate(liveTotalHashRate)}</div></div>
+      <div class="tile"><div class="label">Tu máximo alcanzado</div><div class="value">${formatHashRate(newMax)}</div></div>
+      <div class="tile"><div class="label">Minando ahora</div><div class="value">${onlineActiveCount} / ${activeWorkers.length}</div></div>
+      <div class="tile"><div class="label">En espera</div><div class="value">${onlineWaitingCount}</div></div>
+      <div class="tile"><div class="label">Tus bloques</div><div class="value">${blocksForAddress}</div></div>
+      <div class="tile"><div class="label">Altura de bloque (pool)</div><div class="value">${poolRes.blockHeight ?? "—"}</div></div>
+    `;
+    document.getElementById("totals").innerHTML = totalsHtml;
+
+    const tbody = document.getElementById("workers-body");
+    if (activeWorkers.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">Todavía ningún minero de esta dirección produciendo trabajo válido.</td></tr>`;
+    } else {
+      tbody.innerHTML = activeWorkers.map(w => {
+        const online = isOnline(w.lastSeen);
+        const blocks = countBlocksForWorker(poolRes.blocksFound, ADDRESS, w.name);
+        return `
+          <tr>
+            <td><span class="status-dot ${online ? "on" : "off"}"></span>${online ? "Activo" : "Desconectado"}</td>
+            <td>${w.name || "worker"}</td>
+            <td>${formatHashRate(w.hashRate)}</td>
+            <td class="mono">${formatIp(w.ip)}</td>
+            <td>${formatDuration(w.startTime)}</td>
+            <td class="mono">${w.bestDifficulty ?? "0"}</td>
+            <td>${w.sharesCount ?? 0}</td>
+            <td>${blocks}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    document.getElementById("waiting-toggle").textContent =
+      `${waitingVisible ? "Ocultar" : "Ver"} mineros en espera (${waitingWorkers.length})`;
+
+    const waitingBody = document.getElementById("waiting-body");
+    if (waitingWorkers.length === 0) {
+      waitingBody.innerHTML = `<tr><td colspan="4" class="empty">Ninguno en espera ahora mismo.</td></tr>`;
+    } else {
+      waitingBody.innerHTML = waitingWorkers.map(w => {
+        const online = isOnline(w.lastSeen);
+        return `
+          <tr>
+            <td><span class="status-dot ${online ? "on" : "off"}"></span>${online ? "Conectado" : "Desconectado"}</td>
+            <td>${w.name || "worker"}</td>
+            <td class="mono">${formatIp(w.ip)}</td>
+            <td>${formatDuration(w.startTime)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    document.getElementById("footer").textContent =
+      `Se actualiza solo cada ${REFRESH_MS / 1000}s. El "máximo alcanzado" se guarda en este navegador por dirección, y no se reinicia al recargar la página, salvo que se borren los datos del navegador.`;
+
+  } catch (err) {
+    document.getElementById("subtitle").textContent = "Error al conectar con la pool: " + err.message;
+  }
+}
+
+// Blocks arrive roughly every 10 minutes, so this table refreshes on its
+// own, much slower cadence — no reason to refetch it every REFRESH_MS.
+const RECENT_BLOCKS_REFRESH_MS = 60000;
+
+async function refreshRecentBlocks() {
+  try {
+    const blocks = await fetch(API_BASE + "/recent-blocks").then(r => r.json());
+    const tbody = document.getElementById("recent-blocks-body");
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">Sin datos todavía.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = blocks.map(b => {
+      const mine = b.payoutAddress === ADDRESS;
+      return `
+        <tr class="${mine ? "mine" : ""}">
+          <td>${b.height}</td>
+          <td>${new Date(b.timestamp).toLocaleString("es-ES")}</td>
+          <td>${b.poolName || "Desconocido"}${b.isSolo ? '<span class="badge-solo">SOLO</span>' : ""}</td>
+          <td class="mono addr" title="${b.payoutAddress || ""}">${truncateAddr(b.payoutAddress)}${mine ? '<span class="badge-mine">TUYO</span>' : ""}</td>
+          <td>${formatBtc(b.rewardBtc)}</td>
+          <td>${b.txCount ?? "—"}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    document.getElementById("recent-blocks-body").innerHTML =
+      `<tr><td colspan="6" class="empty">Error al cargar bloques: ${err.message}</td></tr>`;
+  }
+}
+
+// Solo-blocks data only changes every ~3h server-side (a background scan
+// job), but a cache read is cheap — piggyback on the same refresh calls
+// as refreshRecentBlocks() instead of adding a second timer.
+async function refreshSoloBlocks() {
+  try {
+    const blocks = await fetch(API_BASE + "/solo-blocks").then(r => r.json());
+    const tbody = document.getElementById("solo-blocks-body");
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Ninguno en los últimos ~1000 bloques.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = blocks.map(b => {
+      const mine = b.payoutAddress === ADDRESS;
+      return `
+        <tr class="${mine ? "mine" : ""}">
+          <td>${b.height}</td>
+          <td>${new Date(b.timestamp).toLocaleString("es-ES")}</td>
+          <td>${b.poolName || "Desconocido"}</td>
+          <td class="mono addr" title="${b.payoutAddress || ""}">${truncateAddr(b.payoutAddress)}${mine ? '<span class="badge-mine">TUYO</span>' : ""}</td>
+          <td>${formatBtc(b.rewardBtc)}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    document.getElementById("solo-blocks-body").innerHTML =
+      `<tr><td colspan="5" class="empty">Error al cargar bloques: ${err.message}</td></tr>`;
+  }
+}
+
+refreshRecentBlocks();
+refreshSoloBlocks();
+setInterval(() => {
+  refreshRecentBlocks();
+  refreshSoloBlocks();
+}, RECENT_BLOCKS_REFRESH_MS);
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+
+</body>
+</html>

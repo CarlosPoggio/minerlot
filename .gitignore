@@ -1,3 +1,9 @@
+# Local-only credentials/access notes (never commit — repo is public)
+local.access.md
+
+# Claude Code local session state (locks, local permission overrides)
+.claude/
+
 # Node.js
 node_modules/
 dist/
