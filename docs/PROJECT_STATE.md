@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-14
+Last updated: 2026-08-15
 
 This file is the continuity single source of truth for Minerlot. Any Claude
 Code session — on this machine or a fresh clone elsewhere — should read this
@@ -20,8 +20,8 @@ session.
   up to date as of 2026-08-01, no reboot pending.
 - **Bitcoin Core, public-pool, and a monitoring dashboard are deployed and
   running** on the production server, in `/opt/minerlot` (Docker Compose,
-  four containers: `minerlot-bitcoind`, `minerlot-public-pool`,
-  `minerlot-logs`, `minerlot-monitor`). See "Bitcoin node + pool
+  three containers: `minerlot-bitcoind`, `minerlot-public-pool`,
+  `minerlot-monitor`). See "Bitcoin node + pool
   deployment" and "Monitoring dashboard" below for full details.
   **Bitcoin Core is fully synced** (`initialblockdownload: false`,
   `verificationprogress: 1`, confirmed 2026-08-14) — the pool has been
@@ -111,9 +111,11 @@ session.
 ## Next steps
 
 Everything on the original bring-up checklist is done: node fully synced,
-four devices connected and mining, dashboard built out (sync %, log
-viewer, per-address lookup, waiting-miners view), whole deployment
-git-managed. What's actually left:
+four devices connected and mining, dashboard built out (per-address
+lookup, waiting-miners view), whole deployment git-managed. The sync
+percentage tile and live log viewer were removed on 2026-08-15 — once
+synced, sync % never usefully drops again, and the dashboard already
+surfaces everything actionable. What's actually left:
 
 1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
    Lenovo boot logo, unless the boot screen says otherwise) and find
@@ -534,6 +536,33 @@ fixed from the pool side):
   http://192.168.1.2:3334/api/client/` and `Pool API : ... Pool Data
   OK!`.
 
+## Sync percentage and live log viewer removed from the dashboard (2026-08-15)
+
+Requested by Carlos: both features (added 2026-08-02, see "Sync
+percentage + live log viewer added" above) were removed as unnecessary.
+Reasoning: once Bitcoin Core finishes initial sync it never meaningfully
+drops again, so a permanent sync-% tile stops being useful information;
+the node's own logs aren't something the dashboard needs to duplicate.
+
+Full cleanup, not just hiding the tiles — nothing was left running unused:
+
+- `infra/monitor/index.html.template`: removed the sync tile, the "Logs
+  del nodo" section, the `/api/sync` fetch, and the log-viewer WebSocket
+  JS (`connectLogs`).
+- `infra/monitor/nginx.conf`: removed the `/logs-ws` proxy location.
+- `infra/docker-compose.yml`: removed the `logs` service entirely (was
+  only a delivery mechanism for the log viewer).
+- `infra/logs-service/`: deleted (the whole point of that container was
+  streaming `debug.log` to the now-removed log viewer).
+- `public-pool` submodule: removed `GET /api/sync` from
+  `app.controller.ts` and `BitcoinRpcService.getSyncStatus()` — dead code
+  with the tile gone.
+- `infra/deploy.sh`: added `--remove-orphans` to the `docker compose up
+  -d --build` call. Without it, removing a service from
+  `docker-compose.yml` (the `logs` service, here) leaves its container
+  running as an untracked orphan instead of stopping it — `docker compose
+  up -d` only manages services still listed in the file.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
@@ -561,6 +590,5 @@ should be turned into project skills at that point, not before.
   full layout and workflow. Briefly: `docker-compose.yml`,
   `bitcoin/Dockerfile` + `.template`, `public-pool/` (git submodule, our
   fork), `public-pool.env.template`, `monitor/index.html.template` +
-  `nginx.conf`, `logs-service/` (live log streaming), `deploy.sh`,
-  `env.example`. Real secrets only ever exist in a gitignored
-  `infra/.env` on the server.
+  `nginx.conf`, `deploy.sh`, `env.example`. Real secrets only ever exist
+  in a gitignored `infra/.env` on the server.

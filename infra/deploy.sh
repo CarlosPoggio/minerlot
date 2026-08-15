@@ -34,6 +34,6 @@ envsubst '${RPC_USER} ${RPC_PASSWORD}' < bitcoin/bitcoin.conf.template > bitcoin
 envsubst '${RPC_USER} ${RPC_PASSWORD}' < public-pool.env.template > public-pool/.env
 envsubst '${WALLET_ADDRESS}' < monitor/index.html.template > monitor/index.html
 
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 
 echo "Deployed. Check status with: docker compose ps"

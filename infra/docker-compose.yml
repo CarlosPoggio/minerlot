@@ -56,29 +56,12 @@ services:
     environment:
       - NODE_ENV=production
 
-  logs:
-    build:
-      context: ./logs-service
-      dockerfile: Dockerfile
-    container_name: minerlot-logs
-    restart: unless-stopped
-    networks:
-      - minerlot
-    volumes:
-      - bitcoin-data:/data:ro
-    environment:
-      - LOG_PATH=/data/debug.log
-    # No ports published: only reachable via nginx's reverse proxy (monitor
-    # service). Reads bitcoind's debug.log directly off the shared volume —
-    # no Docker socket access needed or granted.
-
   monitor:
     image: nginx:1.27-alpine
     container_name: minerlot-monitor
     restart: unless-stopped
     depends_on:
       - public-pool
-      - logs
     networks:
       - minerlot
     ports:

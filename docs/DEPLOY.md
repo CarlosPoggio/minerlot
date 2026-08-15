@@ -10,7 +10,7 @@ commit here, `git pull` there, run the deploy script.
 
 ```
 infra/
-  docker-compose.yml         # 4 services: bitcoind, public-pool, logs, monitor
+  docker-compose.yml         # 3 services: bitcoind, public-pool, monitor
   env.example                 # copy to .env on the server, fill in real values
   deploy.sh                   # renders templates from .env, then docker compose up -d --build
   bitcoin/
@@ -19,11 +19,9 @@ infra/
   public-pool.env.template     # rendered to public-pool/.env (gitignored)
   public-pool/                 # git submodule -> github.com/CarlosPoggio/public-pool
                                 # (our fork, upstream + a small patch, see below)
-  logs-service/                 # small Node/ws server streaming bitcoind's debug.log
-                                 # to the dashboard's log viewer, read-only volume mount
   monitor/
     index.html.template        # rendered to index.html (gitignored, has the real wallet address)
-    nginx.conf                  # reverse proxy: /api/ -> public-pool, /logs-ws -> logs-service
+    nginx.conf                  # reverse proxy: /api/ -> public-pool
 ```
 
 Nothing under `infra/` that's gitignored contains real secrets in git —
