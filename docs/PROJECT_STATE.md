@@ -39,6 +39,25 @@ session.
   it worked — see "NerdMiner v2 support" below; that section also has the
   now-installed firmware build toolchain on this dev machine (Python +
   PlatformIO) in case another device needs the same treatment.
+- **NerdMiner's on-device screen was rewritten from scratch** (2026-08-15):
+  instead of its original 4 built-in screens, it now shows one custom
+  "pool overview" screen — every worker on the pool, hashrate, uptime,
+  status dot, blocks found, plus a prominent totals area. **Read "NerdMiner
+  rewritten to a single pool-overview screen" below before touching this
+  again — the firmware source lives only on this dev machine
+  (`C:\nm2`), not in this git repo, and is not backed up anywhere.**
+- **Dashboard gained two new sections** (2026-08-15): a live table of the
+  last 50 blocks found on the whole Bitcoin network (pool, payout
+  address, reward), and a "solo-mined blocks" section highlighting which
+  of those (and up to ~1000 blocks back) were found by known solo-mining
+  pools, including our own. This is the deployment's **first external
+  dependency** (mempool.space's public API) — see "Dashboard: network
+  blocks + solo-mining detection" below.
+- **Worker list bugs fixed** (2026-08-15): reconnecting workers no longer
+  show as duplicate rows; a disconnected worker now stays listed (red/
+  offline) for 30 minutes instead of vanishing after 5; per-worker
+  blocks-found count and mining uptime are now in the API response too.
+  See "Worker list fixes" below.
 - **Server confirmed safe to run fully headless**: no monitor, keyboard,
   or USB stick attached — it boots and runs entirely from its internal
   NVMe disk (verified via `findmnt` / `lsblk`, the OS is on `nvme0n1p2`,
@@ -66,6 +85,7 @@ session.
 | Commit style: Conventional Commits, no AI attribution | Repo-wide convention; hard rule against "Co-Authored-By" or similar trailers. |
 | Repo language: English | All files, code, comments, and commit messages in English regardless of conversation language. |
 | GitHub default branch stays `main` even though `develop` is used day-to-day | Follows common convention (GitHub default = `main`) while git-flow-lite still treats `develop` as the integration branch. Documented here as a deliberate, smallest-reasonable choice. |
+| Solo-pool identification via mempool.space's public API, not a self-hosted lookup table | Explicit tradeoff Carlos chose (2026-08-15): no field anywhere (blockchain or otherwise) says "this pool is solo" — the only way to know is a name/slug allowlist. Building and maintaining that allowlist ourselves would be less accurate/current than mempool.space's own maintained pool list. Accepted this as the deployment's first external dependency; if mempool.space is unreachable, `/api/recent-blocks` and `/api/solo-blocks` just fail/serve stale cache — nothing else on the dashboard depends on it. |
 
 ## Open questions / pending on the human
 
@@ -112,10 +132,11 @@ session.
 
 Everything on the original bring-up checklist is done: node fully synced,
 four devices connected and mining, dashboard built out (per-address
-lookup, waiting-miners view), whole deployment git-managed. The sync
-percentage tile and live log viewer were removed on 2026-08-15 — once
-synced, sync % never usefully drops again, and the dashboard already
-surfaces everything actionable. What's actually left:
+lookup, waiting-miners view, network-blocks + solo-mining history), whole
+server deployment git-managed. The sync percentage tile and live log
+viewer were removed on 2026-08-15 — once synced, sync % never usefully
+drops again, and the dashboard already surfaces everything actionable.
+What's actually left:
 
 1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
    Lenovo boot logo, unless the boot screen says otherwise) and find
@@ -123,11 +144,19 @@ surfaces everything actionable. What's actually left:
    version), set it to **Power On**. This cannot be done remotely — it's
    firmware-level, below the OS. Not urgent (nothing else depends on it),
    but not confirmed done either — check with Carlos before assuming.
-2. Optional follow-up, not done and not prioritized: deploy
+2. **Recommended, not yet done**: the NerdMiner firmware changes
+   (single pool-overview screen, see below) live only as uncommitted
+   files on this dev machine at `C:\nm2` — no fork exists on GitHub, so
+   unlike `public-pool` this customization has **no backup anywhere**.
+   Consider forking `github.com/BitMaker-hub/NerdMiner_v2` to
+   `github.com/CarlosPoggio/NerdMiner_v2` (same pattern already used for
+   `public-pool`) and committing the current `C:\nm2` diff there, so a
+   lost/wiped dev machine wouldn't mean redoing this from scratch.
+3. Optional follow-up, not done and not prioritized: deploy
    `public-pool-ui` (a separate Angular/Caddy project) for a fancier
    dashboard than the custom one already built. Low priority now that
    `minerlot-monitor` covers the actual requirements.
-3. Explicitly deferred, roadmap-only, do not start without Carlos asking:
+4. Explicitly deferred, roadmap-only, do not start without Carlos asking:
    opening the pool to the internet with a 2% fee — see
    `docs/ROADMAP_PUBLIC_POOL.md` for the plan and the open security
    questions already talked through (port exposure, dashboard privacy).
@@ -562,6 +591,186 @@ Full cleanup, not just hiding the tiles — nothing was left running unused:
   `docker-compose.yml` (the `logs` service, here) leaves its container
   running as an untracked orphan instead of stopping it — `docker compose
   up -d` only manages services still listed in the file.
+
+## Worker list fixes: duplicate sessions, 30-minute offline grace, blocksFound/online/uptime (2026-08-15)
+
+Three related fixes/additions to `GET /api/client/:address`, all in
+`infra/public-pool`'s `client.controller.ts` / `client.service.ts`
+(commits `fix: dedupe worker sessions by name`, `feat: add per-worker
+blocksFound/online, extend offline grace to 30min`, `feat: add formatted
+uptime per worker`).
+
+- **Duplicate rows on reconnect.** Any reconnection (network blip, or a
+  `public-pool` container restart like the ones this same session did)
+  gives a worker a brand-new `sessionId`. The old session's row wasn't
+  deleted immediately — only swept up by `killDeadClients` — so
+  `getByAddress()` returned both rows for the same physical miner until
+  then, doubling `workersCount` on both the dashboard and the NerdMiner's
+  own screen (which reads this same field). Fixed by collapsing to one
+  row per `clientName`, keeping whichever session last sent a heartbeat.
+- **5-minute offline window was too short to be useful.** A disconnected
+  worker didn't show as "offline" — it just vanished from the list
+  entirely 5 minutes after its last heartbeat, since `killDeadClients`
+  soft-deletes the row. Bumped the window to **30 minutes**, per Carlos's
+  request, so a red "offline" dot has time to actually be seen before the
+  worker drops off the list. (Reconnecting within that window flips it
+  back to green/online automatically — no special-casing needed, it's
+  the same `online` computation either way.)
+- **New response fields, computed server-side on purpose**: `blocksFound`
+  (per-worker count from `BlocksService.getFoundBlocksByAddress()`,
+  grouped by worker name — **this is the full historical count, not
+  reset by reconnects or session changes**, since `BlocksEntity` rows are
+  permanent and keyed by `worker` name, not session), `online` (boolean,
+  150s heartbeat threshold — same threshold the dashboard's own
+  client-side `isOnline()` already used, now also computed once
+  server-side for the NerdMiner, which has no easy way to do this itself),
+  and `uptime` (human-formatted duration string like `"5h 49m"`, mirrors
+  the dashboard's `formatDuration()` — added specifically because the
+  NerdMiner has no reasonable way to format a duration on-device either).
+
+## NerdMiner rewritten to a single pool-overview screen (2026-08-15)
+
+Requested: replace the NerdMiner's 4 built-in screens (mining stats,
+clock, network hashrate, BTC price) with exactly one screen showing every
+worker on the same pool+wallet — name, hashrate, uptime, an online/offline
+status dot, blocks found — plus a large, prominent totals area (combined
+hashrate, total blocks, active-worker count).
+
+**Where this lives — read before touching it again**: the firmware
+source is a local-only clone at `C:\nm2` on this dev machine (tag
+`nerdminer-release-V1.7.0` of `github.com/BitMaker-hub/NerdMiner_v2`,
+upstream, not a fork). All changes described here are **uncommitted
+working-tree edits on that one machine** — there is no git history, no
+fork, no backup anywhere else. The device itself has already been
+flashed with the built result (`pio run -e ESP32_2432S028_2USB --target
+upload --upload-port COM3`, confirmed working over serial), so the
+*running* firmware is safe, but the *source* only exists as files on
+this PC. See "Next steps" above for the recommended fix (fork it to
+GitHub like `public-pool` was).
+
+**Backend dependency**: this screen consumes the `blocksFound`/`online`/
+`uptime` fields added to `GET /api/client/:address` in the section above
+— deploy that first if ever redoing this from scratch.
+
+**Changes made** (`src/monitor.h`, `src/monitor.cpp`,
+`src/drivers/displays/esp23_2432s028r.cpp`):
+- `monitor.h`: new `worker_data` struct (name, formatted hashrate, online
+  bool, blocksFound, uptime) and a `worker_data workers[POOL_MAX_WORKERS]`
+  array (`POOL_MAX_WORKERS = 10`, fleet is 4 today) added to the existing
+  `pool_data` struct, additively — didn't touch the existing
+  `workersCount`/`workersHash`/`bestDifficulty` fields other code reads.
+- `monitor.cpp`'s `getPoolData()`: extended the ArduinoJson filter to
+  admit `name`/`blocksFound`/`online`/`uptime` per worker (was only
+  `sessionId`/`hashRate`), and populates the new per-worker array in the
+  same loop that already summed total hashrate (didn't touch that sum).
+  A failed poll no longer clears the worker list — only the previous
+  top-line fields reset on failure, so a single missed 1-minute poll
+  doesn't blank the screen.
+- `esp23_2432s028r.cpp`: deleted all 4 old screen functions and the old
+  `printPoolData()` bottom bar; added one new
+  `esp32_2432S028R_PoolOverviewScreen()` — solid dark background (no
+  bitmap asset, matches the web dashboard's own palette), a totals region
+  at the top (combined hashrate large, total blocks + active/total count
+  smaller), and a per-worker table below (status dot, name, uptime,
+  hashrate, blocks). Cyclic-screen array shrunk to this one entry;
+  touch/button screen-switching code was left completely untouched (with
+  a 1-element array it's already a harmless no-op).
+
+**Three real bugs found and fixed while building/verifying this on the
+actual device (not caught by compiling — only visible over serial or on
+the physical screen):**
+1. **Table sprite failed to allocate on every redraw.** The first attempt
+   drew the whole worker table into one `320×174` sprite (~111KB) — this
+   consistently failed on real hardware (`#### Sprite Error ####` in the
+   serial log every cycle) even with ~140KB free heap, because the ESP32
+   (no PSRAM on this board) couldn't find one contiguous block that
+   large — fragmentation, not an out-of-memory condition. Fixed by
+   switching to one small sprite per row (~11KB each) instead, matching
+   this codebase's own established pattern for per-region sprites.
+   Confirmed fixed: zero sprite errors in serial output afterward.
+2. **Worker names (and later, uptime/hashrate-unit text) rendered as tofu
+   boxes.** The loaded OpenFontRender font (`DigitalNumbers`, a
+   7-segment-style digit font) only supports `0123456789 ,.:;KMGTPE`
+   per its own source comment — fine for pure numeric readouts, but any
+   other letter (worker names, or the "H/s"/"d/h/m" in hashrate units and
+   uptime strings) has no glyph. Fixed by switching those three fields to
+   TFT_eSPI's classic font engine (`FSS9`/`GFXFF`), which has a full
+   alphabet, instead of OpenFontRender — only the plain-digit
+   blocks-found count still uses the digital font.
+3. **Offline status dot rendered orange instead of red.** A manual RGB565
+   hex conversion for the "offline" color was wrong
+   (`0xF9AA` instead of the correct `0xF289` for something close to
+   `#f85149`). Caught by eye on the physical screen, not by any
+   automated check — worth remembering that RGB565 literals in this
+   codebase are easy to get subtly wrong and have to be eyeballed on
+   real hardware.
+
+**Iterative refinements after the first working version** (all requested
+by Carlos after seeing the device): separated the hashrate's unit suffix
+from the number itself (`suffix_string()` glues e.g. `"G"` straight onto
+the digits with no space — was reading like a stray digit in the small
+table font; now formatted as `"265.484 GH/s"`), added the per-worker
+uptime column, widened the gap between the uptime and hashrate columns,
+and added an "X/Y activos" (active/total worker count) line in the
+totals area, in the space that was originally left blank.
+
+## Dashboard: network blocks + solo-mining detection (2026-08-15)
+
+Two related dashboard additions, both backed by a new
+`infra/public-pool/src/services/mempool-space.service.ts` (this
+deployment's **first external HTTP dependency** — see the "Key decisions"
+table above for the explicit tradeoff Carlos accepted).
+
+**1. Last 50 network blocks** (`GET /api/recent-blocks`, cached 3 min).
+Shows height, time, pool name, payout address, reward, and tx count for
+the last 50 blocks on the whole Bitcoin network — not just ones this
+pool found. Verified against the live mempool.space API before building
+this: its own `/api/v1/blocks` / `/api/v1/blocks/:height` endpoints
+already return the pool name and coinbase payout address per block
+directly (`extras.pool.name`, `extras.coinbaseAddress`) — no per-block
+enrichment calls needed, just walking backward through pages of ~15-20
+blocks until 50 are collected. Rows paid out to whichever address is
+currently being viewed on the dashboard get a "TUYO" badge
+(client-side comparison, `payoutAddress === ADDRESS` — the backend has
+no single-wallet concept, stays generic).
+
+**2. Solo-mined block detection.** Carlos asked whether it's possible to
+tell a solo-mining pool (no shared payout, like this project's own
+`public-pool` instance) apart from a normal shared pool. **There is no
+official field for this anywhere** — not on the blockchain, not in
+mempool.space's data (confirmed by checking their pool-list API
+response shape directly). The only way is a manually curated allowlist
+of pool slugs known to be solo-only. Checked mempool.space's full active
+pool list (33 pools) and identified the solo ones by slug:
+`solock` (Solo CK), `braiinssolo` (Braiins Solo), `solopoolcom`
+(SoloPool.com), `miningdutch` (Mining-Dutch), and `publicpool` (Public
+Pool — the exact software this project runs). This list
+(`SOLO_POOL_SLUGS` in `mempool-space.service.ts`) is a best-effort
+snapshot, not authoritative — an obscure/new solo pool outside it just
+won't be flagged (fails safe, never mislabels a shared pool as solo).
+Any block in the 50-block table found by one of these gets a "SOLO"
+badge.
+
+Carlos also wanted a historical view — chose scanning the **last ~1000
+blocks** (~1 week) as the low-cost option (~65 mempool.space calls) over
+5000 blocks (~330 calls). Scanning that many blocks is too slow to do
+inline on a request, so it runs as a **background job** instead
+(`MempoolSpaceService.onModuleInit()`, same `NODE_APP_INSTANCE`-guarded
+`setInterval` convention `AppService` already uses for its own periodic
+jobs): scans every 3 hours, writes matches into the existing
+`CACHE_MANAGER`. `GET /api/solo-blocks` just reads whatever's cached —
+instant response, empty array only in the brief window right after a
+fresh deploy before the first scan completes. Verified live: the first
+scan after deploying found 0 solo blocks in the last 1000 (expected —
+they're a rare event), logged as `"Solo blocks scan complete: 0 found in
+the last 1000 blocks"`.
+
+**Also fixed in passing, `infra/deploy.sh`**: added `--remove-orphans`
+to the `docker compose up -d --build` call — without it, removing a
+service from `docker-compose.yml` leaves its old container running
+untracked instead of stopping it (this bit during the earlier
+sync-%/log-viewer removal, when the `logs` container kept running after
+its service entry was deleted).
 
 ## Why no `.claude/` yet
 
