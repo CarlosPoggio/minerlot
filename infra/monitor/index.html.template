@@ -115,6 +115,10 @@
     background: var(--accent); color: #0b0f14; font-size: 11px; font-weight: 700;
     border-radius: 6px; padding: 2px 6px; margin-left: 6px;
   }
+  .badge-solo {
+    background: var(--good); color: #0b0f14; font-size: 11px; font-weight: 700;
+    border-radius: 6px; padding: 2px 6px; margin-left: 6px;
+  }
 
   footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 </style>
@@ -195,6 +199,24 @@
     </tbody>
   </table>
 
+  <div class="section-head">
+    <h2>Bloques minados en solitario (últimos ~1000 bloques)</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Altura</th>
+        <th>Hora</th>
+        <th>Pool</th>
+        <th>Dirección de pago</th>
+        <th>Recompensa</th>
+      </tr>
+    </thead>
+    <tbody id="solo-blocks-body">
+      <tr><td colspan="5" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
   <footer id="footer"></footer>
 
 <script>
@@ -231,6 +253,7 @@ function goToAddress(addr) {
   localStorage.setItem("minerlot_last_address", addr);
   refresh();
   refreshRecentBlocks();
+  refreshSoloBlocks();
 }
 
 document.getElementById("search-btn").addEventListener("click", () => {
@@ -405,7 +428,7 @@ async function refreshRecentBlocks() {
         <tr class="${mine ? "mine" : ""}">
           <td>${b.height}</td>
           <td>${new Date(b.timestamp).toLocaleString("es-ES")}</td>
-          <td>${b.poolName || "Desconocido"}</td>
+          <td>${b.poolName || "Desconocido"}${b.isSolo ? '<span class="badge-solo">SOLO</span>' : ""}</td>
           <td class="mono addr" title="${b.payoutAddress || ""}">${truncateAddr(b.payoutAddress)}${mine ? '<span class="badge-mine">TUYO</span>' : ""}</td>
           <td>${formatBtc(b.rewardBtc)}</td>
           <td>${b.txCount ?? "—"}</td>
@@ -418,8 +441,41 @@ async function refreshRecentBlocks() {
   }
 }
 
+// Solo-blocks data only changes every ~3h server-side (a background scan
+// job), but a cache read is cheap — piggyback on the same refresh calls
+// as refreshRecentBlocks() instead of adding a second timer.
+async function refreshSoloBlocks() {
+  try {
+    const blocks = await fetch(API_BASE + "/solo-blocks").then(r => r.json());
+    const tbody = document.getElementById("solo-blocks-body");
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Ninguno en los últimos ~1000 bloques.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = blocks.map(b => {
+      const mine = b.payoutAddress === ADDRESS;
+      return `
+        <tr class="${mine ? "mine" : ""}">
+          <td>${b.height}</td>
+          <td>${new Date(b.timestamp).toLocaleString("es-ES")}</td>
+          <td>${b.poolName || "Desconocido"}</td>
+          <td class="mono addr" title="${b.payoutAddress || ""}">${truncateAddr(b.payoutAddress)}${mine ? '<span class="badge-mine">TUYO</span>' : ""}</td>
+          <td>${formatBtc(b.rewardBtc)}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    document.getElementById("solo-blocks-body").innerHTML =
+      `<tr><td colspan="5" class="empty">Error al cargar bloques: ${err.message}</td></tr>`;
+  }
+}
+
 refreshRecentBlocks();
-setInterval(refreshRecentBlocks, RECENT_BLOCKS_REFRESH_MS);
+refreshSoloBlocks();
+setInterval(() => {
+  refreshRecentBlocks();
+  refreshSoloBlocks();
+}, RECENT_BLOCKS_REFRESH_MS);
 
 refresh();
 setInterval(refresh, REFRESH_MS);
