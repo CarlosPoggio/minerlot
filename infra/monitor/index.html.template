@@ -110,6 +110,12 @@
     color: var(--muted); font-size: 12px; margin: 10px 0 0;
   }
 
+  tbody tr.mine { box-shadow: inset 3px 0 0 var(--accent); }
+  .badge-mine {
+    background: var(--accent); color: #0b0f14; font-size: 11px; font-weight: 700;
+    border-radius: 6px; padding: 2px 6px; margin-left: 6px;
+  }
+
   footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
@@ -170,6 +176,25 @@
     </tbody>
   </table>
 
+  <div class="section-head">
+    <h2>Últimos bloques de la red</h2>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Altura</th>
+        <th>Hora</th>
+        <th>Pool</th>
+        <th>Dirección de pago</th>
+        <th>Recompensa</th>
+        <th>Transacciones</th>
+      </tr>
+    </thead>
+    <tbody id="recent-blocks-body">
+      <tr><td colspan="6" class="empty">Cargando…</td></tr>
+    </tbody>
+  </table>
+
   <footer id="footer"></footer>
 
 <script>
@@ -205,6 +230,7 @@ function goToAddress(addr) {
   history.pushState({}, "", url);
   localStorage.setItem("minerlot_last_address", addr);
   refresh();
+  refreshRecentBlocks();
 }
 
 document.getElementById("search-btn").addEventListener("click", () => {
@@ -249,6 +275,17 @@ function formatIp(ip) {
 function countBlocksForWorker(blockData, address, workerName) {
   if (!Array.isArray(blockData)) return 0;
   return blockData.filter(b => b.minerAddress === address && b.worker === workerName).length;
+}
+
+function truncateAddr(addr) {
+  if (!addr) return "—";
+  if (addr.length <= 20) return addr;
+  return addr.slice(0, 10) + "…" + addr.slice(-6);
+}
+
+function formatBtc(rewardBtc) {
+  if (typeof rewardBtc !== "number") return "—";
+  return rewardBtc.toFixed(4) + " BTC";
 }
 
 let waitingVisible = false;
@@ -349,6 +386,40 @@ async function refresh() {
     document.getElementById("subtitle").textContent = "Error al conectar con la pool: " + err.message;
   }
 }
+
+// Blocks arrive roughly every 10 minutes, so this table refreshes on its
+// own, much slower cadence — no reason to refetch it every REFRESH_MS.
+const RECENT_BLOCKS_REFRESH_MS = 60000;
+
+async function refreshRecentBlocks() {
+  try {
+    const blocks = await fetch(API_BASE + "/recent-blocks").then(r => r.json());
+    const tbody = document.getElementById("recent-blocks-body");
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">Sin datos todavía.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = blocks.map(b => {
+      const mine = b.payoutAddress === ADDRESS;
+      return `
+        <tr class="${mine ? "mine" : ""}">
+          <td>${b.height}</td>
+          <td>${new Date(b.timestamp).toLocaleString("es-ES")}</td>
+          <td>${b.poolName || "Desconocido"}</td>
+          <td class="mono addr" title="${b.payoutAddress || ""}">${truncateAddr(b.payoutAddress)}${mine ? '<span class="badge-mine">TUYO</span>' : ""}</td>
+          <td>${formatBtc(b.rewardBtc)}</td>
+          <td>${b.txCount ?? "—"}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    document.getElementById("recent-blocks-body").innerHTML =
+      `<tr><td colspan="6" class="empty">Error al cargar bloques: ${err.message}</td></tr>`;
+  }
+}
+
+refreshRecentBlocks();
+setInterval(refreshRecentBlocks, RECENT_BLOCKS_REFRESH_MS);
 
 refresh();
 setInterval(refresh, REFRESH_MS);
