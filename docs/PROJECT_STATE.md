@@ -88,10 +88,9 @@ session.
 | Bitcoin Core in pruned mode (`prune=10000`, ~10GB) | Pruning discards old raw blocks after full validation; full validation and complete UTXO set are unaffected. Block-template building (`getblocktemplate`) and chain validation work identically. The node just can't serve historical blocks to peers, which doesn't matter for a personal mining backend. Makes this feasible on an 8GB RAM / 250GB SSD dev machine. |
 | Non-custodial design | Payouts go to a public receiving address only. Private keys/seed phrases never touch this system. |
 | No fees, solo only, for now | Current deployment has no fees, LAN only. Carlos has decided the eventual direction (2026-08-01): a public, internet-facing solo pool with a 2% fee — still not proportional/shared payout, just a fee on top of solo mining. Planned but explicitly not started; see `docs/ROADMAP_PUBLIC_POOL.md`. |
-| Branching: git-flow-lite, `main` + `develop` | `main` = stable snapshots (GitHub default branch). `develop` = day-to-day integration branch, checked out locally by default. |
+| Branching: single `main` branch (since 2026-11-23) | Carlos's decision: this repo is a management/control post for a personal deployment, not an app with releases, so `main` is used day-to-day and by production. Replaces the earlier git-flow-lite (`main` + `develop`). |
 | Commit style: Conventional Commits, no AI attribution | Repo-wide convention; hard rule against "Co-Authored-By" or similar trailers. |
 | Repo language: English | All files, code, comments, and commit messages in English regardless of conversation language. |
-| GitHub default branch stays `main` even though `develop` is used day-to-day | Follows common convention (GitHub default = `main`) while git-flow-lite still treats `develop` as the integration branch. Documented here as a deliberate, smallest-reasonable choice. |
 | Solo-pool identification via mempool.space's public API, not a self-hosted lookup table | Explicit tradeoff Carlos chose (2026-08-15): no field anywhere (blockchain or otherwise) says "this pool is solo" — the only way to know is a name/slug allowlist. Building and maintaining that allowlist ourselves would be less accurate/current than mempool.space's own maintained pool list. Accepted this as the deployment's first external dependency; if mempool.space is unreachable, `/api/recent-blocks` and `/api/solo-blocks` just fail/serve stale cache — nothing else on the dashboard depends on it. |
 
 ## Open questions / pending on the human
@@ -306,7 +305,8 @@ from ones actively producing shares.
 
 Previously, `/opt/minerlot` was a set of hand-copied files with `git
 clone`d subdirectories but no real tracked history of our own. Now the
-server's `/opt/minerlot` **is** a clone of this repo (`develop` branch),
+server's `/opt/minerlot` **is** a clone of this repo (`main` branch since
+2026-11-23; `develop` before),
 and `infra/` is the deployable unit. Full mechanics, secret handling, and
 update workflow: `docs/DEPLOY.md`. Summary of what changed:
 
@@ -887,7 +887,7 @@ the `srclaude` Linux server. Production (`minerlot-node`) did **not**
 move and was not touched (read-only checks only).
 
 - Repo cloned from GitHub with `--recurse-submodules` at
-  `~/proyectos/minerlot` (`develop`), `core.autocrlf=input` in the repo
+  `~/proyectos/minerlot` (`develop` then; `main` since 2026-11-23), `core.autocrlf=input` in the repo
   and the submodule. Submodule `infra/public-pool` at `9507280` with the
   `upstream` remote (`benjamin-wilson/public-pool`) configured.
 - `local.access.md` copied to the repo root (gitignored, mode 600).

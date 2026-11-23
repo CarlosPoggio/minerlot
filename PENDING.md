@@ -93,11 +93,12 @@ fills the log.
   (likely `natpmp=0` in `bitcoin.conf`) before changing anything. It is a
   production config change: needs Carlos's OK and a `bitcoind` restart.
 
-## 5. Production is behind `develop` (no action needed now)
+## 5. ~~Production is behind `develop`~~ (resolved 2026-11-23)
 
-Production runs `develop` at `8b5efb0`; GitHub `develop` is ahead only
-with documentation commits. Nothing to deploy. The next real deploy
-(`docs/DEPLOY.md`) will catch up.
+Since 2026-11-23 the repo has a single `main` branch. Production
+(`/opt/minerlot`) was switched from `develop` (`8b5efb0`) to `main` with git
+only: the difference was documentation, so there was no redeploy and the
+containers were not touched.
 
 ## 6. BIOS: power on after power loss (Carlos, in person)
 

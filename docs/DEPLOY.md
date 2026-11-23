@@ -46,8 +46,8 @@ rendered, real-value files live only on the server.
 ## Shipping an update
 
 1. Make the change (either directly in `infra/`, or in the `public-pool`
-   submodule — see below for that case), commit, push to `develop` (or
-   `main` for a release), same conventions as the rest of this repo.
+   submodule — see below for that case), commit, push to `main` (needs
+   Carlos's explicit OK), same conventions as the rest of this repo.
 2. Run on the server, from the workstation:
 
    ```

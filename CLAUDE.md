@@ -42,10 +42,11 @@ third party.
   blocks to other peers, which is irrelevant here. It was originally chosen
   so the node would fit on modest hardware (i5, 8GB RAM, 250GB SSD), and it
   remains the approach on the production server (`minerlot-node`).
-- **Branch model (git-flow-lite):** `main` = stable/production-ready
-  snapshots, GitHub default branch. `develop` = day-to-day integration
-  branch, checked out locally by default. Feature work branches from and
-  merges back into `develop`; `develop` merges into `main` for releases.
+- **Branch model (single branch, Carlos's decision 2026-11-23):** only
+  `main`, used both day-to-day and by production (`/opt/minerlot` pulls
+  `main`). Short-lived feature branches may branch from `main`; delete them
+  once merged. Pushing or merging to `main` needs Carlos's explicit OK
+  (global MainShield hook).
 - **Commits:** Conventional Commits (`feat:`, `docs:`, `fix:`, `chore:`,
   etc.). Never add "Co-Authored-By" or any AI-attribution trailer.
 
@@ -58,7 +59,7 @@ third party.
 
 - **Production** is `minerlot-node` (Ubuntu Server, LAN IP `192.168.1.2`).
   The stack runs with Docker Compose from `/opt/minerlot`, a git clone of
-  this repo (`develop` branch). Containers: `minerlot-bitcoind`,
+  this repo (`main` branch). Containers: `minerlot-bitcoind`,
   `minerlot-public-pool`, `minerlot-monitor`. Dashboard:
   `http://192.168.1.2/`. Deploy workflow: `docs/DEPLOY.md`.
 - **Development/admin workstation** is the `srclaude` server, with this
