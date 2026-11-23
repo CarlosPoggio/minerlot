@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-15
+Last updated: 2026-11-23
 
 This file is the continuity single source of truth for Minerlot. Any Claude
 Code session — on this machine or a fresh clone elsewhere — should read this
@@ -9,6 +9,10 @@ session.
 
 ## What exists right now
 
+- **Development/admin workstation moved to `srclaude`** (2026-11-23):
+  this repo lives at `~/proyectos/minerlot` there, and production is
+  reached with `ssh minerlot-node`. The original Windows PC is no longer
+  needed. See "Dev workstation moved to srclaude" below.
 - Documentation and repo scaffolding: `CLAUDE.md`, this file, `README.md`,
   `.gitignore`.
 - **Production server is live and reachable**: `minerlot-node`, Ubuntu Server
@@ -36,9 +40,11 @@ session.
   shares**: three Bitaxes (workers `naranja`, `negro`, `nocarcasa`) and
   one NerdMiner v2 (worker `Nerd`, ESP32-2432S028_2USB board, ~54 KH/s).
   The NerdMiner needed two pool-side bugfixes and one firmware fix before
-  it worked — see "NerdMiner v2 support" below; that section also has the
-  now-installed firmware build toolchain on this dev machine (Python +
-  PlatformIO) in case another device needs the same treatment.
+  it worked — see "NerdMiner v2 support" below; that section also
+  describes the firmware build toolchain (Python + PlatformIO) that was
+  installed on the original Windows dev machine. It is **not** set up on
+  `srclaude` — see "NerdMiner firmware fork created" for what that would
+  take.
 - **NerdMiner's on-device screen was rewritten from scratch** (2026-08-15):
   instead of its original 4 built-in screens, it now shows one custom
   "pool overview" screen — every worker on the pool, hashrate, uptime,
@@ -82,10 +88,9 @@ session.
 | Bitcoin Core in pruned mode (`prune=10000`, ~10GB) | Pruning discards old raw blocks after full validation; full validation and complete UTXO set are unaffected. Block-template building (`getblocktemplate`) and chain validation work identically. The node just can't serve historical blocks to peers, which doesn't matter for a personal mining backend. Makes this feasible on an 8GB RAM / 250GB SSD dev machine. |
 | Non-custodial design | Payouts go to a public receiving address only. Private keys/seed phrases never touch this system. |
 | No fees, solo only, for now | Current deployment has no fees, LAN only. Carlos has decided the eventual direction (2026-08-01): a public, internet-facing solo pool with a 2% fee — still not proportional/shared payout, just a fee on top of solo mining. Planned but explicitly not started; see `docs/ROADMAP_PUBLIC_POOL.md`. |
-| Branching: git-flow-lite, `main` + `develop` | `main` = stable snapshots (GitHub default branch). `develop` = day-to-day integration branch, checked out locally by default. |
+| Branching: single `main` branch (since 2026-11-23) | Carlos's decision: this repo is a management/control post for a personal deployment, not an app with releases, so `main` is used day-to-day and by production. Replaces the earlier git-flow-lite (`main` + `develop`). |
 | Commit style: Conventional Commits, no AI attribution | Repo-wide convention; hard rule against "Co-Authored-By" or similar trailers. |
 | Repo language: English | All files, code, comments, and commit messages in English regardless of conversation language. |
-| GitHub default branch stays `main` even though `develop` is used day-to-day | Follows common convention (GitHub default = `main`) while git-flow-lite still treats `develop` as the integration branch. Documented here as a deliberate, smallest-reasonable choice. |
 | Solo-pool identification via mempool.space's public API, not a self-hosted lookup table | Explicit tradeoff Carlos chose (2026-08-15): no field anywhere (blockchain or otherwise) says "this pool is solo" — the only way to know is a name/slug allowlist. Building and maintaining that allowlist ourselves would be less accurate/current than mempool.space's own maintained pool list. Accepted this as the deployment's first external dependency; if mempool.space is unreachable, `/api/recent-blocks` and `/api/solo-blocks` just fail/serve stale cache — nothing else on the dashboard depends on it. |
 
 ## Open questions / pending on the human
@@ -105,12 +110,15 @@ session.
 - **Production machine**: decided — **Ubuntu Server 26.04 LTS** ("Resolute
   Raccoon"), headless, everything run via Docker Compose. Access model: SSH
   over the home LAN only (no port forwarding / no internet-facing exposure)
-  — the dev machine (this one) reaches the production box directly by its
-  local IP. A dedicated ed25519 keypair was generated on the dev machine
-  (`~/.ssh/minerlot_prod`) and is already baked into the install as an
+  — the dev machine reaches the production box directly by its local IP.
+  A dedicated ed25519 keypair was generated on the original Windows dev
+  machine (`~/.ssh/minerlot_prod`) and is baked into the install as an
   authorized key (password SSH login is disabled from first boot; a local
   console password still exists as an emergency fallback — see
-  `local.access.md`, gitignored, on the dev machine).
+  `local.access.md`, gitignored). Since 2026-11-23 the `srclaude`
+  workstation has its own key (`~/.ssh/minerlot_node_ed25519`), also
+  authorized on the server, with the SSH alias `minerlot-node` (user
+  `minerlot`). The Windows key is still authorized too.
 - **Unattended install USB built (2026-08-01)**: rather than a manual
   installer walkthrough, an autoinstall (cloud-init) USB was built directly
   on the dev machine — official Ubuntu Server ISO copied onto the USB,
@@ -124,35 +132,24 @@ session.
   automatically via the autoinstall config's `late-commands`. Full
   credentials/build details are in `local.access.md` (gitignored, dev
   machine only — this repo is public).
-- **Dev machine longevity**: once the production machine is reachable over
-  SSH, all further Bitcoin Core / public-pool work happens there directly,
-  not on this Windows dev machine. This Windows PC remains just for
-  documentation/repo work and as the SSH client used to reach production.
+- **Dev machine longevity**: Bitcoin Core and public-pool only ever run on
+  the production machine. Until 2026-11-23 a Windows PC was the dev
+  machine (documentation/repo work, SSH client for production, NerdMiner
+  firmware builds). Since then the dev/admin workstation is the `srclaude`
+  Linux server (`~/proyectos/minerlot`, SSH alias `minerlot-node`); see
+  "Dev workstation moved to srclaude" below. The workstation never runs
+  the stack itself — see the rules in `CLAUDE.md`.
 
 ## Next steps
 
 Everything on the original bring-up checklist is done: node fully synced,
 four devices connected and mining, dashboard built out (per-address
 lookup, waiting-miners view, network-blocks + solo-mining history), whole
-server deployment git-managed. The sync percentage tile and live log
-viewer were removed on 2026-08-15 — once synced, sync % never usefully
-drops again, and the dashboard already surfaces everything actionable.
-What's actually left:
+server deployment git-managed.
 
-1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
-   Lenovo boot logo, unless the boot screen says otherwise) and find
-   **Power → After Power Loss** (exact wording may vary slightly by BIOS
-   version), set it to **Power On**. This cannot be done remotely — it's
-   firmware-level, below the OS. Not urgent (nothing else depends on it),
-   but not confirmed done either — check with Carlos before assuming.
-2. Optional follow-up, not done and not prioritized: deploy
-   `public-pool-ui` (a separate Angular/Caddy project) for a fancier
-   dashboard than the custom one already built. Low priority now that
-   `minerlot-monitor` covers the actual requirements.
-3. Explicitly deferred, roadmap-only, do not start without Carlos asking:
-   opening the pool to the internet with a 2% fee — see
-   `docs/ROADMAP_PUBLIC_POOL.md` for the plan and the open security
-   questions already talked through (port exposure, dashboard privacy).
+The to-do list (failing tests, BIOS setting, production checks, optional
+and deferred work) moved to `PENDING.md` at the repo root on 2026-11-23,
+so there is a single place to look. Keep it there, not here.
 
 ## Bitcoin node + pool deployment (2026-08-01)
 
@@ -308,7 +305,8 @@ from ones actively producing shares.
 
 Previously, `/opt/minerlot` was a set of hand-copied files with `git
 clone`d subdirectories but no real tracked history of our own. Now the
-server's `/opt/minerlot` **is** a clone of this repo (`develop` branch),
+server's `/opt/minerlot` **is** a clone of this repo (`main` branch since
+2026-11-23; `develop` before),
 and `infra/` is the deployable unit. Full mechanics, secret handling, and
 update workflow: `docs/DEPLOY.md`. Summary of what changed:
 
@@ -528,7 +526,9 @@ addresses/ports and falls back to the hardcoded public API for anything
 else — our `192.168.1.2:3333` didn't match any case. This one required
 building and flashing custom firmware (the miner's own screen can't be
 fixed from the pool side):
-- Toolchain installed on the dev machine (previously had none): Python
+- Toolchain installed on the (Windows) dev machine — not carried over to
+  `srclaude`, see the note at the end of "NerdMiner firmware fork
+  created" (previously had none): Python
   3.13.15 (official installer, all-users) + PlatformIO Core, both via
   `pip`. The USB-serial chip (CH340, needed to flash over the miner's
   micro-USB port) needed its driver installed via Device Manager →
@@ -797,6 +797,18 @@ properly, the same pattern already established for `public-pool`:
   v2 support" section above for why nesting depth broke PlatformIO's
   dependency install).
 
+> **Note (2026-11-23): everything above about building/flashing was done
+> from the original Windows dev machine** (`C:\nm2`, `COM3`, the CH340
+> driver, `Get-PnpDevice`). `C:\nm2` was **not** moved to `srclaude` —
+> nothing is lost, since all customizations are pushed to the fork's
+> `minerlot` branch. To build/flash from `srclaude` in the future (not
+> set up yet; not part of the workstation move): clone
+> `github.com/CarlosPoggio/NerdMiner_v2` and check out branch
+> `minerlot`, install PlatformIO, plug the device into the server over
+> USB (it shows up as a serial device such as `/dev/ttyUSB0` instead of
+> `COM3`), and add the `carlos` user to the `dialout` group so it can
+> open that serial port (currently it is not a member).
+
 ## NerdMiner pool-overview screen refined: colors, LED, layout (2026-08-15)
 
 Follow-up round of fixes/tweaks on top of the initial pool-overview
@@ -868,6 +880,71 @@ it no matter where the column sits. The web dashboard's own duration
 display is untouched — it computes its own independently from
 `startTime` client-side, doesn't consume this `uptime` API field at all.
 
+## Dev workstation moved to srclaude (2026-11-23)
+
+The development/admin workstation moved from the original Windows PC to
+the `srclaude` Linux server. Production (`minerlot-node`) did **not**
+move and was not touched (read-only checks only).
+
+- Repo cloned from GitHub with `--recurse-submodules` at
+  `~/proyectos/minerlot` (`develop` then; `main` since 2026-11-23), `core.autocrlf=input` in the repo
+  and the submodule. Submodule `infra/public-pool` at `9507280` with the
+  `upstream` remote (`benjamin-wilson/public-pool`) configured.
+- `local.access.md` copied to the repo root (gitignored, mode 600).
+- SSH: new key `~/.ssh/minerlot_node_ed25519`, authorized on the server;
+  alias `minerlot-node` (user `minerlot`). The Windows key stays
+  authorized. Working rules for production and for the workstation are in
+  `CLAUDE.md` ("Environment: where things run").
+- `docs/DEPLOY.md` now gives every server command as
+  `ssh minerlot-node '…'` from the workstation, and adds the missing
+  `git submodule update --init` after `git pull` (`infra/deploy.sh` does
+  not update the submodule, so a plain `git pull` + deploy could build an
+  outdated `public-pool`).
+- Docker on `srclaude`: `carlos` is in the `docker` group, but a session
+  started before that membership was added gets "permission denied" on
+  the Docker socket; open a new login session or wrap the command in
+  `sg docker -c '…'`. Not needed for normal work (`npm` is enough).
+
+**Verified on `srclaude` (Node 22.22.1, npm 9.2.0, from the Ubuntu
+packages; production builds with the `node:24.16.0-bookworm-slim`
+image):**
+- `npm ci`: OK (native `sqlite3`/`zeromq` modules build fine).
+- `npm run build`: OK.
+- `npm test`: **53 passed, 10 failed** (63 total). Not an environment
+  problem: the unpatched upstream base (`96a9202`) passes all 63 with the
+  same `node_modules`. Running the two failing spec files at each fork
+  commit shows exactly where they broke:
+  - 9 tests in `src/models/StratumV1Client.spec.ts` since
+    `2391524` (`feat: track per-worker IP, share count, and pre-share
+    connections`) — the patch added new client-service calls
+    (`ensureClientEntity()` from `initStratum()`, heartbeat, share
+    counting) that the spec's mocks don't provide.
+  - 1 test (`ClientController › should be defined`) in
+    `src/controllers/client/client.controller.spec.ts` since `cc4b82c`
+    (`feat: add per-worker blocksFound/online…`) — the controller gained
+    a `BlocksService` dependency the test module doesn't provide.
+  Production behavior is fine (it has been running these patches for
+  months); the specs were just never updated. Not fixed in this move —
+  see `PENDING.md`.
+- Lint: `npm run lint` runs `eslint --fix` and rewrote ~70 upstream files
+  (pure Prettier reformatting). Those changes were set aside in a stash
+  inside the submodule (`git stash list` there; safe to drop) and not
+  committed. Upstream itself is not lint-clean (3943 errors at the base,
+  almost all `prettier/prettier`); the fork adds only more Prettier
+  formatting errors, no new rule types. So `npm run lint` is not a useful
+  gate here — use `npx eslint "{src,apps,libs,test}/**/*.ts"` (no
+  `--fix`) if needed.
+
+**Production snapshot (read-only, 2026-11-23):** `/opt/minerlot` on
+`develop` at `8b5efb0` with a clean tree (GitHub is one docs-only commit
+ahead, nothing to deploy); submodule at `9507280`, matching the pointer;
+all three containers up, `bitcoind` healthy; last 50 `public-pool` log
+lines normal (new blocks, templates, periodic cleanup, solo-blocks scan).
+Disk 22% used, ~12 GB RAM available. The server had rebooted ~15 h
+earlier and the stack came back on its own. The journal shows an abrupt
+stop (no shutdown sequence) on 2026-11-21 and 2026-11-22 that did not
+affect srclaude, so probably not a house-wide power cut; see `PENDING.md`.
+
 ## Why no `.claude/` yet
 
 No `.claude/` folder with project skills/subagents has been created. There
@@ -879,6 +956,7 @@ should be turned into project skills at that point, not before.
 
 - `CLAUDE.md` — project instructions auto-loaded by Claude Code each session.
 - `docs/PROJECT_STATE.md` — this file.
+- `PENDING.md` — the single to-do list (what is left to fix or decide).
 - `docs/CONECTAR_MINERO.md` — Bitaxe/miner connection instructions, in
   Spanish (the one doc deliberately not in English — it's a direct runbook
   for Carlos, not an AI-continuity artifact).
@@ -886,9 +964,9 @@ should be turned into project skills at that point, not before.
   updates to the production server.
 - `README.md` — short public-facing project summary.
 - `.gitignore` — ignores for Node.js, Bitcoin Core data, OS/editor cruft.
-- `local.access.md` (dev machine only, gitignored, not in this repo listing
-  on GitHub) — every credential, IP, and build detail for the production
-  server.
+- `local.access.md` (dev workstation only — repo root on `srclaude`;
+  gitignored, not in this repo listing on GitHub) — every credential, IP,
+  and build detail for the production server. Never print or commit it.
 - `infra/` — the actual deployable unit, mirrored 1:1 on the server at
   `/opt/minerlot/infra` (the server's `/opt/minerlot` is a git clone of
   this whole repo, not a separate copy). See `docs/DEPLOY.md` for the
