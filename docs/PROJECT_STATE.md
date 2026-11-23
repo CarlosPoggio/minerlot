@@ -146,30 +146,11 @@ session.
 Everything on the original bring-up checklist is done: node fully synced,
 four devices connected and mining, dashboard built out (per-address
 lookup, waiting-miners view, network-blocks + solo-mining history), whole
-server deployment git-managed. The sync percentage tile and live log
-viewer were removed on 2026-08-15 — once synced, sync % never usefully
-drops again, and the dashboard already surfaces everything actionable.
-What's actually left:
+server deployment git-managed.
 
-1. **Carlos**: go into BIOS setup (Lenovo ThinkCentre — press F1 at the
-   Lenovo boot logo, unless the boot screen says otherwise) and find
-   **Power → After Power Loss** (exact wording may vary slightly by BIOS
-   version), set it to **Power On**. This cannot be done remotely — it's
-   firmware-level, below the OS. Not urgent (nothing else depends on it),
-   but not confirmed done either — check with Carlos before assuming.
-2. Optional follow-up, not done and not prioritized: deploy
-   `public-pool-ui` (a separate Angular/Caddy project) for a fancier
-   dashboard than the custom one already built. Low priority now that
-   `minerlot-monitor` covers the actual requirements.
-3. Optional, low priority: update the 10 stale public-pool specs broken
-   by our fork patches (mocks for the new client-service calls in
-   `StratumV1Client.spec.ts`, a `BlocksService` provider in
-   `client.controller.spec.ts`) so `npm test` is fully green again. See
-   "Dev workstation moved to srclaude" for the exact commits.
-4. Explicitly deferred, roadmap-only, do not start without Carlos asking:
-   opening the pool to the internet with a 2% fee — see
-   `docs/ROADMAP_PUBLIC_POOL.md` for the plan and the open security
-   questions already talked through (port exposure, dashboard privacy).
+The to-do list (failing tests, BIOS setting, production checks, optional
+and deferred work) moved to `PENDING.md` at the repo root on 2026-11-23,
+so there is a single place to look. Keep it there, not here.
 
 ## Bitcoin node + pool deployment (2026-08-01)
 
@@ -944,7 +925,7 @@ image):**
     a `BlocksService` dependency the test module doesn't provide.
   Production behavior is fine (it has been running these patches for
   months); the specs were just never updated. Not fixed in this move —
-  see "Next steps".
+  see `PENDING.md`.
 - Lint: `npm run lint` runs `eslint --fix` and rewrote ~70 upstream files
   (pure Prettier reformatting). Those changes were set aside in a stash
   inside the submodule (`git stash list` there; safe to drop) and not
@@ -975,6 +956,7 @@ should be turned into project skills at that point, not before.
 
 - `CLAUDE.md` — project instructions auto-loaded by Claude Code each session.
 - `docs/PROJECT_STATE.md` — this file.
+- `PENDING.md` — the single to-do list (what is left to fix or decide).
 - `docs/CONECTAR_MINERO.md` — Bitaxe/miner connection instructions, in
   Spanish (the one doc deliberately not in English — it's a direct runbook
   for Carlos, not an AI-continuity artifact).

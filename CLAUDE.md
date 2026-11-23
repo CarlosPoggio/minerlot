@@ -3,8 +3,12 @@
 ## Read this first
 
 Before doing any work in this repo, read `docs/PROJECT_STATE.md`. It is the
-single source of truth for current status, decisions, and next steps. Update
+single source of truth for current status and decisions. Update
 it as state changes, not only when a task finishes.
+
+Everything still to do lives in `PENDING.md` (repo root): when Carlos asks
+to work on "what's pending", start there. Remove items once done (and
+record them in `docs/PROJECT_STATE.md`); add new ones as they appear.
 
 ## What this project is
 
