@@ -941,9 +941,9 @@ ahead, nothing to deploy); submodule at `9507280`, matching the pointer;
 all three containers up, `bitcoind` healthy; last 50 `public-pool` log
 lines normal (new blocks, templates, periodic cleanup, solo-blocks scan).
 Disk 22% used, ~12 GB RAM available. The server had rebooted ~15 h
-earlier and the stack came back on its own (cause unknown — possibly a
-power cut; relevant to the BIOS "power on after AC loss" item in "Next
-steps").
+earlier and the stack came back on its own. The journal shows an abrupt
+stop (no shutdown sequence) on 2026-11-21 and 2026-11-22 that did not
+affect srclaude, so probably not a house-wide power cut; see `PENDING.md`.
 
 ## Why no `.claude/` yet
 
