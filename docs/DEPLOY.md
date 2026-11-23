@@ -6,6 +6,12 @@ Everything that runs on the production server (`minerlot-node`, currently
 `infra/`) — not a set of hand-copied files — so shipping a change is:
 commit here, `git pull` there, run the deploy script.
 
+All commands below are run from the dev/admin workstation (`srclaude`,
+repo at `~/proyectos/minerlot`) over SSH, using the alias
+`minerlot-node`. Anything that changes production (pull, build, up,
+restart) needs Carlos's explicit OK first — see `CLAUDE.md`. Never run
+`docker compose up` or `deploy.sh` on the workstation itself.
+
 ## Layout
 
 ```
@@ -42,7 +48,18 @@ rendered, real-value files live only on the server.
 1. Make the change (either directly in `infra/`, or in the `public-pool`
    submodule — see below for that case), commit, push to `develop` (or
    `main` for a release), same conventions as the rest of this repo.
-2. On the server: `cd /opt/minerlot && git pull && cd infra && ./deploy.sh`.
+2. Run on the server, from the workstation:
+
+   ```
+   ssh minerlot-node 'cd /opt/minerlot && git pull && git submodule update --init && cd infra && ./deploy.sh'
+   ```
+
+   **Don't skip `git submodule update --init`.** `git pull` only moves the
+   submodule *pointer*; it does not check out the new `public-pool`
+   commit, and `deploy.sh` doesn't do it either. Without this step the
+   build silently uses the old `public-pool` code (our patches live
+   there). Check afterwards with `git submodule status`: a leading `+`
+   means the checkout doesn't match the pointer.
    `docker compose up -d --build` only rebuilds/recreates containers whose
    image or config actually changed — the `bitcoind` container's data
    volume (`minerlot_bitcoin-data`, pinned by name in `docker-compose.yml`
@@ -51,7 +68,13 @@ rendered, real-value files live only on the server.
    sync from zero.
    - **When only one service actually changed** (e.g. a `public-pool`
      patch), prefer a scoped rebuild instead of the full `deploy.sh`:
-     `docker compose build <service> && docker compose up -d <service>`.
+
+     ```
+     ssh minerlot-node 'cd /opt/minerlot && git pull && git submodule update --init && cd infra && docker compose build <service> && docker compose up -d <service>'
+     ```
+
+     (This skips `deploy.sh`'s template rendering, so it's only right
+     when no `.template` file or `.env` value changed.)
      `deploy.sh` runs `docker compose up -d --build` for *every* service,
      including `bitcoind`, whose `Dockerfile` does a live `apt-get` —
      observed failing once on a transient network/DNS hiccup unrelated to
@@ -61,6 +84,12 @@ rendered, real-value files live only on the server.
      dependency of the service you touched); if it was, it comes back
      healthy on its own within `start_period` (180s) — not a problem, just
      worth noticing.
+3. Check it from the workstation (read-only, no approval needed):
+
+   ```
+   ssh -o BatchMode=yes minerlot-node 'cd /opt/minerlot && git status -sb && git submodule status && docker compose -f infra/docker-compose.yml ps'
+   ssh -o BatchMode=yes minerlot-node 'docker compose -f /opt/minerlot/infra/docker-compose.yml logs --tail 50 public-pool'
+   ```
 
 ## Changing public-pool itself
 
@@ -70,10 +99,22 @@ with a small patch on top (see `docs/PROJECT_STATE.md` for exactly what
 and why: crash fix for `getblocktemplate` errors during IBD, plus IP /
 share-count / pre-share-connection tracking for the dashboard).
 
+This work happens on the workstation's clone (`~/proyectos/minerlot/infra/public-pool`,
+`upstream` remote already configured there), never by editing files on the
+server. Test before pushing: `npm ci && npm run build && npm test` inside
+`infra/public-pool` (see `CLAUDE.md` for the known test baseline and why
+not to run `npm run lint`).
+
+After a clone or `git submodule update`, the submodule sits in "detached
+HEAD" (checked out at a commit, not on a branch). Run `git switch master`
+inside `infra/public-pool` before committing there, or the commits won't
+be on any branch.
+
 - To pull in new upstream changes: inside `infra/public-pool`,
-  `git fetch upstream && git rebase upstream/master` (the `upstream`
-  remote is already configured on the server's clone), resolve any
-  conflicts with the patch commits, then `git push origin master` and
+  `git fetch upstream && git rebase upstream/master`, resolve any
+  conflicts with the patch commits, then
+  `git push --force-with-lease origin master` (a rebase rewrites the
+  fork's history, so a plain push is rejected) and
   bump the submodule pointer in this repo
   (`cd infra && git add public-pool && git commit`).
 - To change the patch itself: edit inside `infra/public-pool`, commit
